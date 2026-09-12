@@ -88,6 +88,7 @@ class DecisionInput:
     gap_m: float
     laps_remaining: int
     opponent_speed_mps: float | None = None
+    opponent_corner_limit_mps: float | None = None
     observations: list[ObservationFrame] = field(default_factory=list)
     versions: dict[str, str] = field(default_factory=dict)
 

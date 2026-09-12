@@ -34,7 +34,7 @@ class Calibration:
     closure_means_m: dict[tuple[ActionFamily, RivalPolicy], float] = field(default_factory=dict)
     response_means_mps: dict[tuple[ActionFamily, RivalPolicy], float] = field(default_factory=dict)
     closure_sigma_m: float = 1.0
-    response_sigma_mps: float = 1.2
+    response_sigma_mps: float = 0.8
     samples: int = 0
     provenance: str = "simulation_fitted"
 
@@ -70,15 +70,16 @@ def _rollout(
     policy: RivalPolicy,
     progress_m: float,
     speed_mps: float,
-    horizon_s: float,
+    closure_horizon_s: float,
+    response_horizon_s: float,
     dt_s: float,
     rival_config: RivalPolicyConfig,
 ) -> tuple[float, float]:
-    """Return ``(gap_closed_m, rival_speed_change_mps)`` for one interval.
+    """Return ``(gap_closed_m, rival_speed_change_mps)``.
 
-    The speed *change* is the interval-local response signal. The speed level
-    and the gap closure are both contaminated: the level barely moves in one
-    second, and the gap accumulates the ego's own advantage.
+    Closure is measured over the whole tactical horizon so a first-second
+    acceleration transient cannot masquerade as a sustained gain. The response
+    is the rival's speed change over one decision interval.
     """
     ego = initial_state(plant.battery, progress_m=progress_m, speed_mps=speed_mps)
     rival = initial_state(plant.battery, progress_m=progress_m, speed_mps=speed_mps)
@@ -86,12 +87,16 @@ def _rollout(
         action,
         ACTION_POWER_W.get(action, 0.0),
         ACTION_TARGET_SPEED_MPS.get(action, speed_mps),
-        horizon_s,
+        closure_horizon_s,
     )
     elapsed = 0.0
     since_ego_attack = 0.0
     ego_start, rival_start = ego.progress_m, rival.progress_m
-    while elapsed < horizon_s - 1e-9:
+    response_change = 0.0
+    captured_response = False
+    steps = int(round(closure_horizon_s / dt_s))
+    response_steps = max(1, int(round(response_horizon_s / dt_s)))
+    for step in range(steps):
         rival_power, rival_target = rival_control(
             policy, action, 0.0, since_ego_attack, rival_config
         )
@@ -100,9 +105,12 @@ def _rollout(
         rival = plant.step(rival, rival_control_obj, dt_s).state
         since_ego_attack += dt_s
         elapsed += dt_s
+        if not captured_response and step + 1 >= response_steps:
+            response_change = rival.speed_mps - speed_mps
+            captured_response = True
     ego_advance = ego.progress_m - ego_start
     rival_advance = rival.progress_m - rival_start
-    return ego_advance - rival_advance, rival.speed_mps - speed_mps
+    return ego_advance - rival_advance, response_change
 
 
 def calibrate(
@@ -114,12 +122,17 @@ def calibrate(
     horizon_s: float = 1.0,
     dt_s: float = 0.05,
     speed_mps: float = 80.0,
-    start_progress_m: Sequence[float] = (0.0, 1200.0, 2600.0, 4000.0),
+    start_progress_m: Sequence[float] = (200.0, 1000.0, 1700.0, 2400.0, 3100.0, 3900.0, 4500.0, 5200.0),
+    closure_horizon_s: float = 3.0,
+    response_horizon_s: float = 1.0,
     rival_config: RivalPolicyConfig | None = None,
     tyre_params: TyreParams | None = None,
     closure_sigma_floor_m: float = 0.75,
-    response_sigma_floor_mps: float = 1.2,
+    response_sigma_floor_mps: float = 0.8,
 ) -> Calibration:
+    """Measure response and closure only on sections where the circuit does not
+    mask the policy. Start positions are placed on straights; a corner caps both
+    a defending and a conserving rival at the same speed."""
     plant = Plant(vehicle, battery, track, tyre_params)
     rival_config = rival_config or RivalPolicyConfig()
     closure_means: dict[tuple[ActionFamily, RivalPolicy], float] = {}
@@ -130,7 +143,8 @@ def calibrate(
         for policy in policies:
             samples = [
                 _rollout(
-                    plant, action, policy, progress, speed_mps, horizon_s, dt_s, rival_config
+                    plant, action, policy, progress, speed_mps,
+                    closure_horizon_s, response_horizon_s, dt_s, rival_config,
                 )
                 for progress in start_progress_m
             ]

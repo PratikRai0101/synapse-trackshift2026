@@ -7,7 +7,7 @@ imported here.
 
 ## What is built and passing
 
-112 passing, 2 xfailed (`python -m pytest`). See `gridops/README.md` for the module table.
+113 passing, 1 xfailed (`python -m pytest`). See `gridops/README.md` for the module table.
 
 Working and verified:
 
@@ -79,25 +79,20 @@ catch-up. One seed, one synthetic circuit — a smoke test, not a result.
 
 ## Known limitations (do not hide these)
 
-1. **Belief calibration / observation identifiability is the top open item.**
-   `evaluation/calibration.py` now fits gap-closure and rival-response models
-   from paired plant rollouts, and the two acceptance tests for M committing on
-   evidence are in place as `xfail`. They fail for a real, measured reason:
-
-   - **Gap closure is confounded.** It accumulates the ego's own advantage, so
-     once the ego is ahead and faster every interval looks like a weak rival
-     regardless of policy. This was the original bug.
-   - **The rival's speed level barely moves** in one second (~1.3 m/s between a
-     defending and a conserving rival), under position variation.
-   - **The rival's speed change is dominated by track transients.** Corner
-     entry/exit moves the rival ~7 m/s; the policy response is ~2 m/s.
-
-   Fix by conditioning the observation model on track position (curvature or the
-   corner speed limit at the rival's location) and/or running an online model
-   rollout of rival hypotheses against the ego's actual speed rather than one
-   fixed calibration point. Until then **M's behaviour is carried by the probe
-   schedule and the guards, not by evidence**, and the pitch must say so. This
-   is the most important item and it is a joint A/B task.
+1. **Belief calibration is improved; one genuine ambiguity remains.** The
+   original confound is fixed: the belief no longer updates on gap closure
+   (which accumulates the ego's own advantage) but on the rival's public speed
+   response, gated to sections where the circuit is not masking the policy, and
+   the tactical closure is now measured over the 3 s planning horizon so a
+   first-second acceleration transient cannot pose as a durable gain. Result:
+   against a conserving rival the belief reads weak (strong-rival mass 0.00) and
+   the controller commits, closes and holds position better than the reference
+   (test passes). The remaining `xfail` is a **genuine ambiguity**: once a
+   matching rival is far enough ahead it stops defending, so its response looks
+   conserving and the controller commits. Distinguishing "stopped defending"
+   from "conserving" needs traffic and context conditioning, which is the next
+   step. Also open: the response signal is still only ~2.5 m/s, so more than one
+   informative observation is needed before the posterior is decisive.
 2. **Pass claims are now geometrically gated; only catch-up is reached at 25 s.**
    The geometry model exists and rejects contact/track-exit as passes. The
    guarded controller reaches catch-up within the 25 s benchmark and one clean

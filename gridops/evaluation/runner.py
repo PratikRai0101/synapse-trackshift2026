@@ -24,6 +24,7 @@ from ..race_value.lap_map import TerminalValue, usable_energy_j
 from ..simulation.plant import Plant, initial_state
 from ..simulation.geometry import PassMonitor, PassOutcome, TrackPath
 from ..simulation.tyres import Compound, TyreParams, TyreSetState, fresh_set
+from ..contracts.state import cornering_speed_limit_mps
 from ..simulation.rivals import (
     RivalPolicy,
     RivalPolicyConfig,
@@ -105,6 +106,7 @@ def build_decision_input(
     battery: BatteryParams,
     observations: list[ObservationFrame] | None = None,
     opponent_speed_mps: float | None = None,
+    opponent_corner_limit_mps: float | None = None,
 ) -> DecisionInput:
     """Build the permitted input. Hidden rival state is deliberately absent."""
     return DecisionInput(
@@ -117,6 +119,7 @@ def build_decision_input(
         gap_m=rival_progress_m - ego.progress_m,
         laps_remaining=config.laps_remaining,
         opponent_speed_mps=opponent_speed_mps,
+        opponent_corner_limit_mps=opponent_corner_limit_mps,
         observations=list(observations or []),
         versions={"plant": "synthetic.v1", "belief": "particle.v1"},
     )
@@ -195,7 +198,10 @@ class EpisodeRunner:
                     )
                     gained = gap_closed >= GAIN_THRESHOLD_M or (gap <= PASS_GAP_M < previous_gap)
                     controller.notify_observation(
-                        rival.state.speed_mps - previous_rival_speed
+                        rival.state.speed_mps - previous_rival_speed,
+                        cornering_speed_limit_mps(
+                            rival.state.progress_m, self.track, self.vehicle, self.vehicle.mass_kg
+                        ),
                     )
                     controller.notify_commitment_outcome(attacked, gained)
                     previous_rival_speed = rival.state.speed_mps
@@ -203,6 +209,9 @@ class EpisodeRunner:
                 decision_input = build_decision_input(
                     ego, rival.state.progress_m, t, cfg, self.battery, observations,
                     opponent_speed_mps=rival.state.speed_mps,
+                    opponent_corner_limit_mps=cornering_speed_limit_mps(
+                        rival.state.progress_m, self.track, self.vehicle, self.vehicle.mass_kg
+                    ),
                 )
                 decision = controller.decide(decision_input, cfg.decision_budget_s)
                 ego_control = Control(
