@@ -33,6 +33,7 @@ Use the venv at the repository root: `../.venv/bin/python`.
 | `decision/tactical.py` | cheap surrogate generative model for POMCP | calibration open |
 | `decision/belief.py` | persistent particle belief, credible set, non-stationarity mixing | calibration open |
 | `decision/hmm_belief.py` | compact four-mode HMM, forward filtering, stationary comparator | done, tested |
+| `decision/safety.py` | contact supervisor: kinematic projection caps the committed target speed | done, tested |
 | `race_value/lap_map.py` | monotone terminal resource value, reserve band, finite-horizon value recursion | done, tested |
 | `evaluation/controllers.py` | reference, stationary (B_stat), posterior-mean (B_mean), ambiguity-aware (M) | wired |
 | `evaluation/calibration.py` | paired plant rollouts fitting gap-closure and rival-response models | done; identifiability open |
@@ -42,7 +43,7 @@ Use the venv at the repository root: `../.venv/bin/python`.
 
 ## Test coverage
 
-121 passing, 1 xfailed. Highlights:
+125 passing, 1 xfailed. Highlights:
 
 - **Battery:** OCV/current-root identity, energy conservation derivative,
   current/voltage/SOC saturation, cooling, no post-hoc SOC clipping.
@@ -81,9 +82,11 @@ Use the venv at the repository root: `../.venv/bin/python`.
   ``alpha=1``; minimax regret selects the action with the lowest worst regret.
 - **Batch and ablations:** seeded paired rows, failures retained, completion
   rates, per-seed paired deltas, and one-factor ablation variants. The
-  3-seed x 5-policy development batch shows M beating the reference by ~52 m
-  median paired gap but incurring ~1 086 modeled contacts — recorded as
-  limitation 8 in HANDOFF, not hidden.
+  3-seed x 5-policy development batch shows M beating the reference by ~40 m
+  median paired gap with **zero** modeled contacts after the contact supervisor.
+- **Safety:** contact is a hard feasibility check. Directly behind and closing
+  predicts contact; lateral separation clears it; the safe-speed scan returns a
+  cap that the projection confirms is contact-free.
 
 ## Known open item: residual ambiguity
 

@@ -290,6 +290,7 @@ class AmbiguityAwareController:
         response_fn=None,
         rival_config=None,
         response_target_ceiling_mps: float = 90.0,
+        contact_guard=None,
         use_continuation_value: bool = True,
         use_belief_update: bool = True,
         use_probe: bool = True,
@@ -310,6 +311,7 @@ class AmbiguityAwareController:
         self.response_fn = response_fn
         self.rival_config = rival_config or RivalPolicyConfig()
         self.response_target_ceiling_mps = response_target_ceiling_mps
+        self.contact_guard = contact_guard
         self.use_belief_update = use_belief_update
         self.use_probe = use_probe
         #: Ablation switches. ``use_continuation_value=False`` prices energy at
@@ -454,9 +456,30 @@ class AmbiguityAwareController:
         Returns ``(power, target_speed, problems)``; ``power is None`` means the
         plan failed residual validation and the caller must fall back.
         """
-        target = _target_speed(family, decision_input.ego_speed_mps)
+        requested = _target_speed(family, decision_input.ego_speed_mps)
+        target = requested
+        capped = False
+        # Hard contact feasibility: never commit a target speed that projects a
+        # modelled contact. A capped target means the ego may move laterally now
+        # and close on a later cycle, not that it drives through the rival.
+        if self.contact_guard is not None and decision_input.opponent_speed_mps is not None:
+            target = self.contact_guard.max_safe_target_speed(
+                ego_progress_m=decision_input.ego_progress_m,
+                ego_speed_mps=decision_input.ego_speed_mps,
+                ego_lateral_m=decision_input.ego_lateral_m,
+                rival_progress_m=decision_input.ego_progress_m + decision_input.gap_m,
+                rival_speed_mps=decision_input.opponent_speed_mps,
+                rival_lateral_m=0.0,
+                desired_target_speed_mps=requested,
+                ego_target_lateral_m=_target_lateral(family),
+                horizon_s=float(self.horizon),
+            )
+            capped = target < requested - 1e-6
         if self.planner is None:
-            return _power_for_family(family, TacticalParams()), target, ()
+            return self._scale_power(
+                _power_for_family(family, TacticalParams()), target, requested, capped,
+                decision_input,
+            ), target, ()
         # Attack families must hold pace, so they use a tight lower trust bound
         # and therefore actually deploy; other families may trade speed away.
         lower_trust = {
@@ -477,7 +500,34 @@ class AmbiguityAwareController:
         if not ok:
             return None, None, tuple(problems)
         next_speed = float(plan.speed_mps[1]) if len(plan.speed_mps) > 1 else target
-        return plan.first_power_w(), next_speed, ()
+        return (
+            self._scale_power(
+                plan.first_power_w(), next_speed, requested, capped, decision_input
+            ),
+            next_speed,
+            (),
+        )
+
+    @staticmethod
+    def _scale_power(
+        power: float,
+        target: float,
+        requested: float,
+        capped: bool,
+        decision_input: DecisionInput,
+    ) -> float:
+        """Deploy only what the (possibly contact-capped) target needs.
+
+        Without this, a speed-capped commitment still drains the battery at the
+        uncapped family power, which is energy spent for no progress.
+        """
+        if not capped:
+            return power
+        full_gain = requested - decision_input.ego_speed_mps
+        capped_gain = target - decision_input.ego_speed_mps
+        if full_gain <= 1e-6:
+            return 0.0
+        return power * max(0.0, min(1.0, capped_gain / full_gain))
 
     def _retain(
         self,
@@ -489,6 +539,26 @@ class AmbiguityAwareController:
     ) -> Decision:
         self.pending_attack = False
         self.last_family = ActionFamily.REFERENCE
+        lateral = self._last_lateral_m if abs(decision_input.gap_m) < 8.0 else 0.0
+        # Recentering must not steer into the rival either.
+        if (
+            self.contact_guard is not None
+            and decision_input.opponent_speed_mps is not None
+            and lateral != decision_input.ego_lateral_m
+        ):
+            would_contact = self.contact_guard.predicts_contact(
+                ego_progress_m=decision_input.ego_progress_m,
+                ego_speed_mps=decision_input.ego_speed_mps,
+                ego_lateral_m=decision_input.ego_lateral_m,
+                rival_progress_m=decision_input.ego_progress_m + decision_input.gap_m,
+                rival_speed_mps=decision_input.opponent_speed_mps,
+                rival_lateral_m=0.0,
+                ego_target_speed_mps=decision_input.ego_speed_mps,
+                ego_target_lateral_m=lateral,
+                horizon_s=float(self.horizon),
+            )
+            if would_contact:
+                lateral = self._last_lateral_m
         return Decision(
             family=ActionFamily.REFERENCE,
             p_k_dc_w=0.0,
@@ -503,9 +573,7 @@ class AmbiguityAwareController:
             timed_out=result.timed_out if result else False,
             # Hold the side offset while alongside, so the ego does not steer
             # back into a rival it is passing; recentre once clearly clear.
-            lateral_target_m=(
-                self._last_lateral_m if abs(decision_input.gap_m) < 8.0 else 0.0
-            ),
+            lateral_target_m=lateral,
         )
 
     # -- causal feedback ---------------------------------------------------

@@ -118,6 +118,7 @@ def build_decision_input(
         ego_battery_temp_k=ego.battery.temp_k,
         gap_m=rival_progress_m - ego.progress_m,
         laps_remaining=config.laps_remaining,
+        ego_lateral_m=ego.lateral_m,
         opponent_speed_mps=opponent_speed_mps,
         opponent_corner_limit_mps=opponent_corner_limit_mps,
         observations=list(observations or []),

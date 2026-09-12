@@ -29,6 +29,7 @@ from ..contracts.state import ActionFamily
 from ..decision.belief import RivalBelief
 from ..decision.hmm_belief import HMMBelief, HMMConfig
 from ..decision.planning import ConditionalConvexPlanner, PlannerConfig
+from ..decision.safety import ContactGuard
 from ..simulation.rivals import REACTIVE_POLICIES, RivalPolicy
 
 #: Controllers available to a batch, including ablations.
@@ -220,7 +221,7 @@ def build_controller(
             terminal_value=runner.terminal_value,
             belief=HMMBelief(HMMConfig(stationary=False, emission_sigma_m=sigma)),
             horizon=3, iterations=300,
-            closure_fn=closure_fn, response_fn=response_fn, seed=seed,
+            contact_guard=ContactGuard(runner.track), closure_fn=closure_fn, response_fn=response_fn, seed=seed,
         )
     if name == "m_convex":
         return AmbiguityAwareController(
@@ -231,28 +232,28 @@ def build_controller(
                 runner.track, runner.vehicle, runner.battery, runner.terminal_value,
                 PlannerConfig(),
             ),
-            closure_fn=closure_fn, response_fn=response_fn, seed=seed,
+            contact_guard=ContactGuard(runner.track), closure_fn=closure_fn, response_fn=response_fn, seed=seed,
         )
     if name == "m_hmm":
         return AmbiguityAwareController(
             terminal_value=runner.terminal_value,
             belief=HMMBelief(HMMConfig(stationary=False, emission_sigma_m=sigma)),
             horizon=3, iterations=300,
-            closure_fn=closure_fn, response_fn=response_fn, seed=seed,
+            contact_guard=ContactGuard(runner.track), closure_fn=closure_fn, response_fn=response_fn, seed=seed,
         )
     if name == "m_hmm_stationary":
         return AmbiguityAwareController(
             terminal_value=runner.terminal_value,
             belief=HMMBelief(HMMConfig(stationary=True, emission_sigma_m=sigma)),
             horizon=3, iterations=300,
-            closure_fn=closure_fn, response_fn=response_fn, seed=seed,
+            contact_guard=ContactGuard(runner.track), closure_fn=closure_fn, response_fn=response_fn, seed=seed,
         )
     if name == "m_no_continuation":
         return AmbiguityAwareController(
             terminal_value=runner.terminal_value,
             belief=HMMBelief(HMMConfig(stationary=False, emission_sigma_m=sigma)),
             horizon=3, iterations=300,
-            closure_fn=closure_fn, response_fn=response_fn,
+            contact_guard=ContactGuard(runner.track), closure_fn=closure_fn, response_fn=response_fn,
             use_continuation_value=False, seed=seed,
         )
     if name == "m_no_margin":
@@ -261,14 +262,14 @@ def build_controller(
             belief=HMMBelief(HMMConfig(stationary=False, emission_sigma_m=sigma)),
             horizon=3, iterations=300,
             commitment_margin_s=-1.0,
-            closure_fn=closure_fn, response_fn=response_fn, seed=seed,
+            contact_guard=ContactGuard(runner.track), closure_fn=closure_fn, response_fn=response_fn, seed=seed,
         )
     if name == "m_no_belief":
         return AmbiguityAwareController(
             terminal_value=runner.terminal_value,
             belief=HMMBelief(HMMConfig(stationary=False, emission_sigma_m=sigma)),
             horizon=3, iterations=300,
-            closure_fn=closure_fn, response_fn=response_fn,
+            contact_guard=ContactGuard(runner.track), closure_fn=closure_fn, response_fn=response_fn,
             use_belief_update=False, seed=seed,
         )
     if name == "m_no_probe":
@@ -276,7 +277,7 @@ def build_controller(
             terminal_value=runner.terminal_value,
             belief=HMMBelief(HMMConfig(stationary=False, emission_sigma_m=sigma)),
             horizon=3, iterations=300,
-            closure_fn=closure_fn, response_fn=response_fn,
+            contact_guard=ContactGuard(runner.track), closure_fn=closure_fn, response_fn=response_fn,
             use_probe=False, seed=seed,
         )
     if name == "m_posterior_mean":
@@ -284,7 +285,7 @@ def build_controller(
             terminal_value=runner.terminal_value,
             belief=HMMBelief(HMMConfig(stationary=False, emission_sigma_m=sigma)),
             horizon=3, iterations=300,
-            closure_fn=closure_fn, response_fn=response_fn,
+            contact_guard=ContactGuard(runner.track), closure_fn=closure_fn, response_fn=response_fn,
             criterion="posterior_mean", seed=seed,
         )
     raise ValueError(f"unknown controller: {name}")
