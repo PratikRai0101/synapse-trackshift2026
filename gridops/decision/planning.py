@@ -107,8 +107,17 @@ class ConditionalConvexPlanner:
         usable_energy_j: float,
         base_speed_mps: float,
         mass_kg: float | None = None,
+        lower_trust_dv_mps: float | None = None,
     ) -> ConvexPlan:
+        """Plan a deployment profile.
+
+        ``lower_trust_dv_mps`` tightens only the *lower* speed bound relative to
+        the corner-limited reference. An attack uses a small value so the plan
+        must hold pace and therefore deploy, instead of trading speed away for
+        energy. The reference is already corner-limited, so corners stay legal.
+        """
         cfg = self.config
+        dv_lo = cfg.trust_dv_mps if lower_trust_dv_mps is None else lower_trust_dv_mps
         mass = mass_kg if mass_kg is not None else self.vehicle.mass_kg
         n = max(2, int(round(cfg.horizon_m / cfg.ds_m)))
         ds = cfg.horizon_m / n
@@ -169,10 +178,15 @@ class ConditionalConvexPlanner:
                     self.vehicle.mu_base * fz[k],
                     cp.hstack([f_x / cfg.rx, f_y / cfg.ry]),
                 ),
-                e[k] <= 0.5 * mass * (v + cfg.trust_dv_mps) ** 2 / J_PER_MJ,
-                e[k] >= 0.5 * mass * max(cfg.min_speed_mps, v - cfg.trust_dv_mps) ** 2
-                / J_PER_MJ,
             ]
+            if k >= 1:
+                # The trust region constrains planned states, not the measured
+                # initial state, which is fixed by the current speed.
+                constraints += [
+                    e[k] <= 0.5 * mass * (v + cfg.trust_dv_mps) ** 2 / J_PER_MJ,
+                    e[k] >= 0.5 * mass * max(cfg.min_speed_mps, v - dv_lo) ** 2
+                    / J_PER_MJ,
+                ]
 
         problem = cp.Problem(objective, constraints)
         is_dcp = bool(problem.is_dcp())
