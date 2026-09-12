@@ -76,6 +76,8 @@ class Level2Plan:
     envelope: EnvelopePoint
     search_values: Mapping[str, float] | None = None
     spatial_reference: SpatialReference | None = None
+    spatial_feasible: bool = True
+    spatial_residual: float = 0.0
 
 
 class BoundedScenarioPlanner:
@@ -131,8 +133,10 @@ class BoundedScenarioPlanner:
                                    max(0.0, curvature + 0.0002 * index))
                       for index in range(5))
         tactical_speed = max(0.0, own_speed_kmh + selected.expected_gap_change_s * 20.0)
-        spatial = (self.spatial.plan(track, tactical_speed, speed_gain_kmh=0.0)
-                   if self.use_spatial else None)
+        spatial = (self.spatial.plan(
+            track, tactical_speed, speed_gain_kmh=0.0,
+            initial_energy=energy, reserve_energy=5.0,
+        ) if self.use_spatial else None)
         if spatial is None:
             reference = tuple(envelope.speed_limit_kmh for _ in range(5))
             lambda_kin = tuple(0.0 for _ in range(5))
@@ -140,8 +144,12 @@ class BoundedScenarioPlanner:
             reference = spatial.speeds_kmh
             lambda_kin = spatial.kinetic_costates
         lambda_b = max(0.01, (100.0 - energy) / 100.0 + max(0.0, wear_cost))
-        return Level2Plan(selected.command, reference, lambda_kin, lambda_b,
-                          tuple(scored), envelope, search.values, spatial)
+        return Level2Plan(
+            selected.command, reference, lambda_kin, lambda_b,
+            tuple(scored), envelope, search.values, spatial,
+            spatial.envelope.feasible if spatial else True,
+            spatial.envelope.max_residual if spatial else 0.0,
+        )
 
 
 @dataclass(frozen=True)

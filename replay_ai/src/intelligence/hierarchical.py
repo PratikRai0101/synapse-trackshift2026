@@ -290,6 +290,7 @@ class MotorsportIntelligence:
         soh = self._runtime_battery_soh
         soh_decision = self.last_soh_decision
         envelope = getattr(self.last_level2, "envelope", None)
+        spatial = getattr(self.last_level2, "spatial_reference", None)
         return {
             "battery_soh": soh,
             "battery_resistance": (soh_decision.resistance if soh_decision else
@@ -297,8 +298,11 @@ class MotorsportIntelligence:
             "battery_wear_cost": soh_decision.wear_cost if soh_decision else 0.0,
             "lap_target_energy": (self.last_lap_plan[0].deploy_energy
                                    if self.last_lap_plan else None),
-            "socp_feasible": envelope.feasible if envelope else None,
-            "socp_residual": getattr(envelope, "max_residual", None) if envelope else None,
+            "socp_feasible": (spatial.envelope.feasible if spatial else
+                               (envelope.feasible if envelope else None)),
+            "socp_residual": (spatial.envelope.max_residual if spatial else
+                              (getattr(envelope, "max_residual", None)
+                               if envelope else None)),
             "scenario_values": (dict(self.last_level2.search_values)
                                  if self.last_level2 else {}),
         }
