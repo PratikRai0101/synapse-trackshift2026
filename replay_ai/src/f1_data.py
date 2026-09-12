@@ -608,6 +608,11 @@ def get_race_telemetry(session, session_type="R"):
     ]
 
     num_processes = min(cpu_count(), len(drivers))
+    if num_processes < 1:
+        raise ValueError(
+            "Session contains no loaded drivers and no usable precomputed telemetry. "
+            "Load the FastF1 session or choose an available cached event."
+        )
 
     with Pool(processes=num_processes) as pool:
         results = pool.map(_process_single_driver, driver_args)

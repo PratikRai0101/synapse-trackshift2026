@@ -7,6 +7,43 @@ from src.gui.race_selection import RaceSelectionWindow
 from PySide6.QtWidgets import QApplication
 from src.lib.season import get_season
 import logging
+import os
+
+
+def _example_lap_from_cached_frames(race_telemetry):
+  """Reconstruct display geometry when FastF1 session data is unavailable."""
+  import pandas as pd
+
+  frames = race_telemetry.get('frames', [])
+  driver = next((code for frame in frames for code in frame.get('drivers', {})), None)
+  if driver is None:
+    return None
+  rows = []
+  target_lap = None
+  last_distance = -1.0
+  for frame in frames:
+    sample = frame.get('drivers', {}).get(driver)
+    if not sample:
+      continue
+    lap = int(sample.get('lap', 0) or 0)
+    if target_lap is None and lap > 0:
+      target_lap = lap
+    if lap != target_lap:
+      if rows:
+        break
+      continue
+    distance = float(sample.get('dist', 0.0) or 0.0)
+    if distance <= last_distance:
+      continue
+    rows.append({
+      'X': float(sample.get('x', 0.0) or 0.0),
+      'Y': float(sample.get('y', 0.0) or 0.0),
+      'Distance': distance,
+      'Speed': float(sample.get('speed', 0.0) or 0.0),
+      'DRS': int(sample.get('drs', 0) or 0),
+    })
+    last_distance = distance
+  return pd.DataFrame(rows) if len(rows) >= 2 else None
 
 def main(year=None, round_number=None, playback_speed=1, session_type='R', visible_hud=True, ready_file=None, show_telemetry_viewer=True):
   print(f"Loading F1 {year} Round {round_number} Session '{session_type}'")
@@ -59,19 +96,32 @@ def main(year=None, round_number=None, playback_speed=1, session_type='R', visib
 
     # fallback: Use fastest race lap
     if example_lap is None:
-        fastest_lap = session.laps.pick_fastest()
-        if fastest_lap is not None:
-            example_lap = fastest_lap.get_telemetry()
-            print("Using fastest race lap (DRS detection may use speed-based fallback)")
+        try:
+            fastest_lap = session.laps.pick_fastest()
+            if fastest_lap is not None:
+                example_lap = fastest_lap.get_telemetry()
+                print("Using fastest race lap (DRS detection may use speed-based fallback)")
+        except Exception as exc:
+            print(f"Race lap telemetry unavailable: {exc}")
+    if example_lap is None:
+        example_lap = _example_lap_from_cached_frames(race_telemetry)
+        if example_lap is not None:
+            print("Reconstructed track layout from cached public replay frames")
         else:
-            print("Error: No valid laps found in session")
+            print("Error: No valid track geometry found")
             return
 
-    drivers = session.drivers
+    drivers = list(session.drivers)
+    if not drivers and race_telemetry.get('frames'):
+        drivers = list(race_telemetry['frames'][0].get('drivers', {}))
 
     # Get circuit rotation
 
-    circuit_rotation = get_circuit_rotation(session)
+    try:
+      circuit_rotation = get_circuit_rotation(session)
+    except Exception as exc:
+      circuit_rotation = 0.0
+      print(f"Circuit metadata unavailable; using cached orientation: {exc}")
     
     # Prepare session info for display banner
     session_info = {
@@ -110,6 +160,12 @@ def main(year=None, round_number=None, playback_speed=1, session_type='R', visib
     )
 
 if __name__ == "__main__":
+
+  if "--help" in sys.argv or "-h" in sys.argv:
+    print("Usage: python main.py [--viewer] [--year YEAR] [--round ROUND] "
+          "[--qualifying|--sprint|--sprint-qualifying] [--no-hud] "
+          "[--refresh-data] [--ready-file PATH]")
+    sys.exit(0)
 
   # Capture native crashes and uncaught exceptions so failures are diagnosable.
   import faulthandler
