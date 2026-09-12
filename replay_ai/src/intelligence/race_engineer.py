@@ -51,6 +51,9 @@ class DecisionReport:
     tactical: Any = None
     rival_hmm: Any = None
     runtime_metrics: Dict[str, Any] = field(default_factory=dict)
+    tactical_action_scores: Any = field(default_factory=tuple)
+    position: Optional[int] = None
+    branch_start: Any = None
 
     def as_dict(self) -> Dict[str, Any]:
         return {
@@ -66,6 +69,10 @@ class DecisionReport:
                 "most_likely_state": tuple(x.value for x in self.rival_hmm.most_likely_state),
             } if self.rival_hmm else None),
             "runtime_metrics": dict(self.runtime_metrics),
+            "tactical_action_scores": [
+                (action.__dict__ if hasattr(action, "__dict__") else dict(action))
+                for action in self.tactical_action_scores
+            ],
         }
 
 

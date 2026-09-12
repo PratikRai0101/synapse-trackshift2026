@@ -1,7 +1,7 @@
 """Action-responsive closed-loop reference simulator for intelligence tests."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 import math
 import random
@@ -66,20 +66,37 @@ class ClosedLoopSimulator:
                  seed: int = 0,
                  use_mpc: bool = True,
                  controller_variant: str = "full",
-                 scenario: str = "nominal") -> None:
+                 scenario: str = "nominal",
+                 initial_speed_kmh: float | None = None,
+                 initial_rival_speed_kmh: float | None = None,
+                 initial_gap_s: float | None = None,
+                 initial_energy: float | None = None,
+                 initial_temperature: float | None = None,
+                 initial_battery_soh: float | None = None,
+                 initial_lap: int | None = None) -> None:
         self.config = config or SimulationConfig()
         self.rival_mode = rival_mode  # simulation truth; never passed to model
         rng = random.Random(seed)
-        initial_speed = 275.0 + rng.random() * 10.0
-        initial_gap = 0.8 + rng.random() * 0.4
+        initial_speed = (275.0 + rng.random() * 10.0
+                         if initial_speed_kmh is None else float(initial_speed_kmh))
+        initial_gap = (0.8 + rng.random() * 0.4
+                       if initial_gap_s is None else max(0.0, float(initial_gap_s)))
         energy, soh, temperature = {
             "nominal": (70.0, 1.0, 70.0),
             "energy_stress": (35.0, 0.82, 85.0),
             "thermal_stress": (50.0, 0.88, 105.0),
         }.get(scenario, (70.0, 1.0, 70.0))
+        if initial_energy is not None:
+            energy = max(0.0, min(100.0, float(initial_energy)))
+        if initial_battery_soh is not None:
+            soh = max(0.60, min(1.0, float(initial_battery_soh)))
+        if initial_temperature is not None:
+            temperature = max(20.0, min(120.0, float(initial_temperature)))
         self.initial_energy = energy
         self.ego = CarState(initial_speed, initial_gap, energy)
-        self.rival = CarState(initial_speed, initial_gap, energy)
+        rival_speed = (initial_speed if initial_rival_speed_kmh is None
+                       else float(initial_rival_speed_kmh))
+        self.rival = CarState(rival_speed, initial_gap, energy)
         self.plant = VehiclePlant(PlantState(
             speed_kmh=initial_speed,
             energy=energy,
@@ -87,7 +104,7 @@ class ClosedLoopSimulator:
         ))
         self.time_s = 0.0
         self.step_index = 0
-        self.current_lap = 1
+        self.current_lap = max(1, int(initial_lap)) if initial_lap is not None else 1
         self.lap_deployed = 0.0
         self.cumulative_deployed = 0.0
         self.cumulative_recovered = 0.0
@@ -129,7 +146,7 @@ class ClosedLoopSimulator:
             lap=self.current_lap,
         )
 
-    def step(self) -> SimulationStep:
+    def step(self, command_override: str | None = None) -> SimulationStep:
         cfg = self.config
         public = self._observation()
         decision = self.model.observe(
@@ -138,6 +155,14 @@ class ClosedLoopSimulator:
             battery_soh=self.battery_soh,
             battery_temperature=self.battery_temperature,
         )
+        if command_override is not None:
+            if command_override not in {"BURN", "HARVEST", "PROACTIVE TRAP"}:
+                raise ValueError(f"unknown counterfactual command: {command_override}")
+            decision = replace(
+                decision,
+                command=command_override,
+                reason="counterfactual branch action; public replay history unchanged",
+            )
         target = decision.lap_energy_target
         target_remaining = max(0.0, (target or 0.0) - self.lap_deployed)
         can_deploy = target is None or target_remaining > 0.0
@@ -219,3 +244,8 @@ class ClosedLoopSimulator:
 
     def run(self, steps: int) -> tuple[SimulationStep, ...]:
         return tuple(self.step() for _ in range(max(0, int(steps))))
+
+    def run_forced(self, command: str, steps: int) -> tuple[SimulationStep, ...]:
+        """Run a separate counterfactual branch with a fixed first-level action."""
+        return tuple(self.step(command_override=command)
+                     for _ in range(max(0, int(steps))))

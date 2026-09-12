@@ -25,6 +25,14 @@ from src.intelligence.config import load_config
 from src.intelligence.race_engineer import RaceEngineer
 from src.intelligence.hierarchical import MotorsportIntelligence, RivalTelemetry
 from src.intelligence_hud import RaceEngineerHUD
+from src.judge_mode import (
+    BranchStart,
+    JudgeModeController,
+    JudgeModeModel,
+    JudgeModePanel,
+    build_bookmarks,
+    run_counterfactual,
+)
 from src.ui_theme import CARBON, EDGE, ELECTRIC, F1_RED, MUTED, PANEL, TEXT
 
 
@@ -68,6 +76,21 @@ class F1RaceReplayWindow(arcade.Window):
         self.paused = False
         self.total_laps = total_laps
         self.has_weather = any("weather" in frame for frame in frames) if frames else False
+        # Judge Mode is additive: the original Race Engineer HUD remains
+        # available behind J, while this deterministic presentation is the
+        # default for the AI replay (F1_JUDGE_MODE=0 restores the old default).
+        judge_enabled = os.environ.get("F1_JUDGE_MODE", "1").lower() not in {
+            "0", "false", "off"
+        }
+        self.judge_bookmarks = build_bookmarks(self.n_frames, total_laps)
+        self.judge_mode_controller = JudgeModeController(
+            enabled=judge_enabled, bookmarks=self.judge_bookmarks
+        )
+        self.judge_panel = JudgeModePanel()
+        self._judge_snapshot = None
+        self._counterfactual_branch = None
+        self._counterfactual_status = None
+        self._counterfactual_running = False
 
         # Pre-compute per-driver lap times from the full frame data.
         # This avoids playback-speed-dependent sampling errors when insight
@@ -144,8 +167,8 @@ class F1RaceReplayWindow(arcade.Window):
         self.driver_info_comp = DriverInfoComponent(left=20, width=300)
         self.controls_popup_comp = ControlsPopupComponent()
 
-        self.controls_popup_comp.set_size(340, 250) # width/height of the popup box
-        self.controls_popup_comp.set_font_sizes(header_font_size=16, body_font_size=13) # adjust font sizes
+        self.controls_popup_comp.set_size(360, 330) # width/height of the popup box
+        self.controls_popup_comp.set_font_sizes(header_font_size=16, body_font_size=12) # adjust font sizes
         self.degradation_integrator = None
         if session is not None:
             try:
@@ -265,7 +288,7 @@ class F1RaceReplayWindow(arcade.Window):
         # UI bands reserved so the circuit never renders underneath the top
         # banner or the bottom control/HUD strip.
         self.top_ui_reserved = 96
-        self.bottom_ui_reserved = 300
+        self.bottom_ui_reserved = self._required_bottom_ui_reserve()
 
         # Load Background
         bg_path = os.path.join("resources", "background.png")
@@ -1445,6 +1468,62 @@ class F1RaceReplayWindow(arcade.Window):
             else:
                 arcade.draw_circle_filled(mx, my, 2.1, (120, 120, 132))
 
+    def _clear_intelligence_state(self):
+        """Reset stateful inference after a non-linear replay seek."""
+        self._intelligence_models.clear()
+        self._intelligence_cache.clear()
+        self._last_intelligence_key = None
+        self._last_tactical = None
+        self._last_rival_hmm = None
+        self._last_lap_plan = None
+        self._last_runtime_metrics = {}
+
+    def _clear_counterfactual_branch(self):
+        """Drop a branch when the recorded replay state moves."""
+        self._counterfactual_branch = None
+        self._counterfactual_status = None
+
+    def _select_judge_bookmark(self, index: int):
+        """Seek to a reproducible recorded moment without editing telemetry."""
+        bookmark = self.judge_mode_controller.select(index)
+        if bookmark is None:
+            return
+        self.frame_index = float(bookmark.frame_index)
+        self.paused = True
+        self._clear_counterfactual_branch()
+        self._counterfactual_status = f"BOOKMARK • {bookmark.title}"
+        self._clear_intelligence_state()
+        self._broadcast_telemetry_state()
+
+    def _step_judge_bookmark(self, direction: int):
+        bookmark = self.judge_mode_controller.step_bookmark(direction)
+        if bookmark is None:
+            return
+        self._select_judge_bookmark(self.judge_mode_controller.active_index or 0)
+
+    def _launch_counterfactual(self):
+        """Evaluate actions in isolated simulators from the selected public state."""
+        if self._counterfactual_running:
+            return
+        report = self._focus_report
+        start = getattr(report, "branch_start", None) if report is not None else None
+        if start is None:
+            self._counterfactual_status = "COUNTERFACTUAL • SELECT A DRIVER WITH A RIVAL"
+            return
+        self.paused = True
+        self._counterfactual_running = True
+        self._counterfactual_branch = None
+        self._counterfactual_status = "COUNTERFACTUAL • RUNNING ISOLATED BRANCH"
+        try:
+            self._counterfactual_branch = run_counterfactual(
+                start, steps=20, seed=start.frame_index
+            )
+            self._counterfactual_status = self._counterfactual_branch.status_text
+        except Exception as exc:
+            self._counterfactual_status = f"COUNTERFACTUAL • ERROR: {exc}"
+        finally:
+            self._counterfactual_running = False
+
     def _build_focus_report(self, frame, selected_drivers, ordered_codes, driver_progress):
         """Build the Race Engineer decision report for the focus driver."""
         focus_code = next((c for c in selected_drivers if c in ordered_codes), None)
@@ -1522,14 +1601,55 @@ class F1RaceReplayWindow(arcade.Window):
                     own_soc=energy.soc,
                     gap_s=gap_ahead_s,
                 )
-                cached = (tactical, model.last_hmm, model.last_lap_plan,
-                          model.runtime_metrics())
+                cached = (
+                    tactical,
+                    model.last_hmm,
+                    model.last_lap_plan,
+                    model.runtime_metrics(),
+                    tuple(getattr(model.last_level2, "action_scores", ())),
+                )
                 self._intelligence_cache[intelligence_key] = cached
             (report.tactical, report.rival_hmm, report.lap_plan,
-             runtime_metrics) = cached
+             runtime_metrics, action_scores) = cached
             report.runtime_metrics = dict(runtime_metrics)
+            report.tactical_action_scores = tuple(action_scores)
+            report.branch_start = BranchStart(
+                frame_index=frame_idx,
+                timestamp_s=float(frame.get("t", 0.0) or 0.0),
+                driver=focus_code,
+                rival=ahead,
+                own_speed_kmh=float(fdrv.get("speed", 0.0) or 0.0),
+                rival_speed_kmh=float(adrv.get("speed", 0.0) or 0.0),
+                gap_s=float(gap_ahead_s or 0.0),
+                own_energy=float(energy.soc),
+                battery_temperature=float(
+                    fdrv.get("battery_temperature", 70.0) or 70.0
+                ),
+                battery_soh=float(fdrv.get("battery_soh", 1.0) or 1.0),
+                lap=lap,
+            )
             self._last_intelligence_key = intelligence_key
         return report
+
+    def _required_bottom_ui_reserve(self):
+        """Keep the circuit above whichever visible decision HUD is active."""
+        has_focus = bool(
+            getattr(self, "selected_drivers", [])
+            or getattr(self, "selected_driver", None)
+        )
+        if not has_focus:
+            return 300.0
+        if self.judge_mode_controller.enabled:
+            return self.judge_panel.required_bottom_reserve(
+                self.width, self.height, self.left_ui_margin,
+                self.right_ui_margin,
+            )
+        # The engineering panel is 222 px high from y=130.
+        return 364.0
+
+    def _refresh_decision_layout(self):
+        self.bottom_ui_reserved = self._required_bottom_ui_reserve()
+        self.update_scaling(self.width, self.height)
 
     def update_scaling(self, screen_w, screen_h):
         """
@@ -1594,6 +1714,7 @@ class F1RaceReplayWindow(arcade.Window):
     def on_resize(self, width, height):
         """Called automatically by Arcade when window is resized."""
         super().on_resize(width, height)
+        self.bottom_ui_reserved = self._required_bottom_ui_reserve()
         self.update_scaling(width, height)
         # notify components
         self.leaderboard_comp.x = max(20, self.width - self.right_ui_margin + 12)
@@ -2029,13 +2150,32 @@ class F1RaceReplayWindow(arcade.Window):
 
         # Race Engineer decision HUD (estimated energy + overtake risk/reward)
         self._focus_report = None
+        if not selected_drivers:
+            self.judge_panel.bookmark_rects = []
         try:
             if selected_drivers and getattr(self, "visible_hud", True):
                 report = self._build_focus_report(
                     frame, selected_drivers, ordered_codes, driver_progress
                 )
                 self._focus_report = report
-                self.race_engineer_hud.draw(self, report, visible=True)
+                if self.judge_mode_controller.enabled:
+                    self._judge_snapshot = JudgeModeModel.from_report(
+                        report,
+                        gap_s=self._focus_gap_ahead_s,
+                        timestamp_s=float(frame.get("t", 0.0) or 0.0),
+                    )
+                    self.judge_panel.draw(
+                        self,
+                        self._judge_snapshot,
+                        bookmarks=self.judge_bookmarks,
+                        active_bookmark=self.judge_mode_controller.active_index,
+                        branch=self._counterfactual_branch,
+                        status_text=self._counterfactual_status,
+                        visible=True,
+                    )
+                else:
+                    self._judge_snapshot = None
+                    self.race_engineer_hud.draw(self, report, visible=True)
 
             # Broadcast minimap (bottom-right)
             self._draw_minimap(frame, selected_drivers, battle_set, battle_ordered)
@@ -2079,6 +2219,8 @@ class F1RaceReplayWindow(arcade.Window):
         if self.paused:
             return
 
+        if self._counterfactual_branch is not None:
+            self._clear_counterfactual_branch()
         self.frame_index += delta_time * FPS * self.playback_speed
         
         if self.frame_index >= self.n_frames:
@@ -2093,14 +2235,20 @@ class F1RaceReplayWindow(arcade.Window):
             arcade.close_window()
             return
         if symbol == arcade.key.SPACE:
+            was_paused = self.paused
             self.paused = not self.paused
+            if was_paused and not self.paused:
+                self.judge_mode_controller.active_index = None
+                self._clear_counterfactual_branch()
             self._broadcast_telemetry_state()
             self.race_controls_comp.flash_button('play_pause')
         elif symbol == arcade.key.RIGHT:
+            self._clear_counterfactual_branch()
             self.was_paused_before_hold = self.paused
             self.is_forwarding = True
             self.paused = True
         elif symbol == arcade.key.LEFT:
+            self._clear_counterfactual_branch()
             self.was_paused_before_hold = self.paused
             self.is_rewinding = True
             self.paused = True
@@ -2138,9 +2286,35 @@ class F1RaceReplayWindow(arcade.Window):
             self.playback_speed = 4.0
             self._broadcast_telemetry_state()
             self.race_controls_comp.flash_button('speed_increase')
+        elif symbol == arcade.key.J:
+            # Judge Mode is an additive view; J returns to the original
+            # Race Engineer HUD without changing any inference state.
+            self.judge_mode_controller.toggle()
+            self._refresh_decision_layout()
+        elif symbol == arcade.key.KEY_5:
+            self._select_judge_bookmark(0)
+        elif symbol == arcade.key.KEY_6:
+            self._select_judge_bookmark(1)
+        elif symbol == arcade.key.KEY_7:
+            self._select_judge_bookmark(2)
+        elif symbol == arcade.key.KEY_8:
+            self._select_judge_bookmark(3)
+        elif symbol == arcade.key.KEY_9:
+            self._select_judge_bookmark(4)
+        elif symbol == arcade.key.KEY_0:
+            self._select_judge_bookmark(5)
+        elif symbol == arcade.key.N:
+            self._step_judge_bookmark(1)
+        elif symbol == arcade.key.P:
+            self._step_judge_bookmark(-1)
+        elif symbol == arcade.key.C:
+            self._launch_counterfactual()
         elif symbol == arcade.key.R:
             self.frame_index = 0.0
             self.playback_speed = 1.0
+            self.judge_mode_controller.active_index = None
+            self._clear_counterfactual_branch()
+            self._clear_intelligence_state()
             self._broadcast_telemetry_state()
             # Clear degradation cache on restart
             if self.degradation_integrator:
@@ -2187,13 +2361,24 @@ class F1RaceReplayWindow(arcade.Window):
         if self.controls_popup_comp.on_mouse_press(self, x, y, button, modifiers):
             return
         if self.race_controls_comp.on_mouse_press(self, x, y, button, modifiers):
+            self._clear_counterfactual_branch()
             return
         if self.progress_bar_comp.on_mouse_press(self, x, y, button, modifiers):
+            self._clear_counterfactual_branch()
             return
+        previous_selection = tuple(getattr(self, "selected_drivers", []) or [])
         if self.leaderboard_comp.on_mouse_press(self, x, y, button, modifiers):
+            if tuple(getattr(self, "selected_drivers", []) or []) != previous_selection:
+                self._clear_counterfactual_branch()
+                self._refresh_decision_layout()
             return
         if self.legend_comp.on_mouse_press(self, x, y, button, modifiers):
             return
+        if self.judge_mode_controller.enabled:
+            bookmark_index = self.judge_panel.bookmark_at(x, y)
+            if bookmark_index is not None:
+                self._select_judge_bookmark(bookmark_index)
+                return
         # default: clear selection if clicked elsewhere
         # Clear both the single and multi-select state so focus mode does not
         # stay stuck on a driver after the selection is dismissed.
@@ -2204,6 +2389,9 @@ class F1RaceReplayWindow(arcade.Window):
         # Reset cached battle state so the banner/connectors vanish immediately.
         self._battle_ordered = []
         self._battle_codes_set = set()
+        self._clear_counterfactual_branch()
+        self.judge_panel.bookmark_rects = []
+        self._refresh_decision_layout()
         
     def on_mouse_motion(self, x: float, y: float, dx: float, dy: float):
         """Handle mouse motion for hover effects on progress bar and controls."""
