@@ -1,0 +1,160 @@
+import type { WorldOrigin } from "../state/store";
+import type { TrackGeometry } from "../net/protocol";
+
+/**
+ * Replay world space (FastF1 metres, y-up on the 2D plane) mapped into the 3D
+ * scene: scene X = world x, scene Z = world y, scene Y = up.
+ *
+ * Centring happens through `origin` so the camera can live near the origin
+ * regardless of circuit.
+ */
+export function sceneX(worldX: number, origin: WorldOrigin): number {
+  return worldX - origin.x;
+}
+
+export function sceneZ(worldY: number, origin: WorldOrigin): number {
+  return worldY - origin.y;
+}
+
+export interface TrackBounds {
+  radius: number;
+  width: number;
+  depth: number;
+}
+
+export function computeBounds(geometry: TrackGeometry): TrackBounds {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+
+  for (const value of geometry.x) {
+    if (value < minX) minX = value;
+    if (value > maxX) maxX = value;
+  }
+  for (const value of geometry.y) {
+    if (value < minY) minY = value;
+    if (value > maxY) maxY = value;
+  }
+
+  const width = maxX - minX;
+  const depth = maxY - minY;
+  return {
+    width,
+    depth,
+    radius: Math.max(width, depth) / 2,
+  };
+}
+
+/**
+ * Heading of the track itself at a fractional position along the lap.
+ *
+ * The centreline is a smooth, noise-free curve, whereas a per-frame position
+ * delta is dominated by floating-point noise at low speed. A chase camera wants
+ * the direction of travel along the track, so this is a far more stable source
+ * than the car's own yaw. Interpolated between stations so the quantised index
+ * does not produce steps.
+ */
+export function trackHeading(
+  fraction: number,
+  geometry: TrackGeometry,
+): number | null {
+  const count = geometry.x.length;
+  if (count < 3 || !Number.isFinite(fraction)) return null;
+
+  const wrapped = ((fraction % 1) + 1) % 1;
+  const position = wrapped * count;
+  const base = Math.floor(position) % count;
+  const nextIndex = (base + 1) % count;
+  const blend = position - Math.floor(position);
+
+  // Tangent at a station runs from the previous to the next point.
+  const tangentX = (index: number) => {
+    const prev = (index - 1 + count) % count;
+    const next = (index + 1) % count;
+    return geometry.x[next] - geometry.x[prev];
+  };
+  const tangentY = (index: number) => {
+    const prev = (index - 1 + count) % count;
+    const next = (index + 1) % count;
+    return geometry.y[next] - geometry.y[prev];
+  };
+
+  const x = tangentX(base) + (tangentX(nextIndex) - tangentX(base)) * blend;
+  const y = tangentY(base) + (tangentY(nextIndex) - tangentY(base)) * blend;
+  if (x === 0 && y === 0) return null;
+
+  return Math.atan2(x, y);
+}
+
+/**
+ * Triangle strip between two polylines of equal length, laid flat on the
+ * ground plane. Closed loop: the final station connects back to the first.
+ *
+ * `colors` optionally supplies a per-station RGB triple, used for the
+ * alternating red/white kerbs.
+ */
+export function buildStripGeometry(
+  innerX: number[],
+  innerY: number[],
+  outerX: number[],
+  outerY: number[],
+  origin: WorldOrigin,
+  height = 0,
+  colors?: (station: number) => [number, number, number],
+): {
+  positions: Float32Array;
+  indices: Uint32Array;
+  colors?: Float32Array;
+} {
+  const count = Math.min(
+    innerX.length,
+    innerY.length,
+    outerX.length,
+    outerY.length,
+  );
+
+  const positions = new Float32Array(count * 2 * 3);
+  const indices = new Uint32Array((count - 1) * 6 + 6);
+  const vertexColors = colors ? new Float32Array(count * 2 * 3) : undefined;
+
+  for (let i = 0; i < count; i += 1) {
+    const base = i * 6;
+    positions[base + 0] = sceneX(innerX[i], origin);
+    positions[base + 1] = height;
+    positions[base + 2] = sceneZ(innerY[i], origin);
+    positions[base + 3] = sceneX(outerX[i], origin);
+    positions[base + 4] = height;
+    positions[base + 5] = sceneZ(outerY[i], origin);
+
+    if (vertexColors && colors) {
+      const [r, g, b] = colors(i);
+      vertexColors[base + 0] = r;
+      vertexColors[base + 1] = g;
+      vertexColors[base + 2] = b;
+      vertexColors[base + 3] = r;
+      vertexColors[base + 4] = g;
+      vertexColors[base + 5] = b;
+    }
+  }
+
+  let cursor = 0;
+  const quad = (a: number, b: number, c: number, d: number) => {
+    indices[cursor++] = a;
+    indices[cursor++] = b;
+    indices[cursor++] = c;
+    indices[cursor++] = c;
+    indices[cursor++] = b;
+    indices[cursor++] = d;
+  };
+
+  // Winding is chosen to face up (+Y).
+  for (let i = 0; i < count - 1; i += 1) {
+    const a = i * 2;
+    quad(a, a + 1, a + 2, a + 3);
+  }
+  // Close the loop.
+  quad((count - 1) * 2, (count - 1) * 2 + 1, 0, 1);
+
+  return { positions, indices, colors: vertexColors };
+}
