@@ -33,14 +33,14 @@ Use the venv at the repository root: `../.venv/bin/python`.
 | `decision/tactical.py` | cheap surrogate generative model for POMCP | calibration open |
 | `decision/belief.py` | persistent particle belief, credible set, non-stationarity mixing | calibration open |
 | `decision/hmm_belief.py` | compact four-mode HMM, forward filtering, stationary comparator | done, tested |
-| `race_value/lap_map.py` | monotone terminal resource value, reserve band | done, tested |
+| `race_value/lap_map.py` | monotone terminal resource value, reserve band, finite-horizon value recursion | done, tested |
 | `evaluation/controllers.py` | reference, stationary (B_stat), posterior-mean (B_mean), ambiguity-aware (M) | wired |
 | `evaluation/runner.py` | deterministic episode, public-only `DecisionInput` | done, tested |
 | `cli.py` | validate-config, run, benchmark | done |
 
 ## Test coverage
 
-95 tests. Highlights:
+108 tests. Highlights:
 
 - **Battery:** OCV/current-root identity, energy conservation derivative,
   current/voltage/SOC saturation, cooling, no post-hoc SOC clipping.
@@ -71,6 +71,12 @@ Use the venv at the repository root: `../.venv/bin/python`.
   double-count, the stationary configuration has an identity transition while
   the non-stationary one allows switching, and a poorly explained observation
   does not collapse the posterior.
+- **Race value:** terminal reserve priced once at ``V_0``, value grows with laps
+  remaining, out-of-domain queries flagged not extrapolated, deploy target
+  respects the reserve floor and the per-lap cap, scarce energy does not deploy
+  more than rich.
+- **Risk criteria:** CVaR is more conservative than the mean and equals it at
+  ``alpha=1``; minimax regret selects the action with the lowest worst regret.
 
 ## Conventions frozen at G0
 

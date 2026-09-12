@@ -7,7 +7,7 @@ imported here.
 
 ## What is built and passing
 
-95 tests, `python -m pytest`. See `gridops/README.md` for the module table.
+108 tests, `python -m pytest`. See `gridops/README.md` for the module table.
 
 Working and verified:
 
@@ -43,6 +43,12 @@ Working and verified:
   reset that touches only tyre state. Coupled into the plant's grip envelope.
   The **R09 paired ablation** shows wear 0 → 0.9 grows the gap 69 → 105 m and
   grip saturations 83 → 162.
+- **Remaining-race value recursion** (`race_value/lap_map.py`): finite-horizon
+  DP over usable energy, ``V_l(E)`` with the terminal reserve priced once at
+  ``V_0``, interpolated between grid points, out-of-domain queries flagged.
+- **Risk criteria** (`decision/commitment.py`): CVaR of paired improvement and
+  minimax regret, completing the B3 comparator set alongside the worst-case
+  commitment rule.
 - **HMM belief backend** (`decision/hmm_belief.py`): a compact four-mode HMM
   with forward filtering, a transition matrix encoding non-stationarity, and a
   `stationary=True` configuration that reproduces the base-paper fixed-regime
@@ -110,29 +116,28 @@ catch-up. One seed, one synthetic circuit — a smoke test, not a result.
 ## Next slices, by owner
 
 **Developer A (simulation/control)**
-1. Calibrate the family-to-planner mapping: for ATTACK, target rival pace plus a
-   margin (or add a declared gap term), so a committed attack closes. Record the
-   planner's predicted profile beside the plant's realized trajectory.
-2. Add the geometric passing model: kinematic bicycle, footprints, track
-   containment, separation and persistence. Until then, every output stays
-   catch-up only.
-3. Add tyre thermal/wear state to the plant and expose it as a grip modifier.
-4. Cache candidate profiles per valid state to keep planner cost outside the
-   rollout loop; benchmark cold vs warm solve time.
+1. Calibrate the family-to-planner mapping so a committed attack closes; then
+   record the planner's predicted profile beside the plant's realized
+   trajectory per decision (model-mismatch reporting).
+2. Wire a pit-stop event that calls `reset_for_new_set` and rebases the lap map.
+3. Cache candidate profiles per valid state and benchmark cold vs warm solve
+   time before the batch.
+4. Unify the grip envelope: the plant uses a circular envelope, the planner an
+   `rx/ry` ellipse.
 
 **Developer B (evidence/evaluation)**
-1. **Calibrate the belief likelihood.** Either fit `_CLOSE_*` to plant
-   closures or replace the rank update with a likelihood calibrated on paired
-   surrogate/plant rollouts. Acceptance: against a conserving rival the
-   credible set becomes weak-dominated and M commits `attack_now`; against a
-   matching rival it retains. This is the G3 gate.
+1. **Calibrate the belief likelihood.** Fit the surrogate closure means (or the
+   HMM emission means) to paired surrogate/plant rollouts. Acceptance: against
+   a conserving rival the credible set becomes weak-dominated and M commits
+   `attack_now`; against a matching rival it retains. This is the G3 gate.
 2. Wire the replay repository's FastF1 cache into an `adapters/` module that
    emits provenance-labelled observation frames with `available_at`. Replay is
    Phase 1 only; it cannot test reactivity.
 3. Expand `benchmark` to multiple seeds with paired initial conditions and
    report failures, uncertainty intervals and missed opportunities.
 4. Add the ablation matrix from the spec: full M, minus continuation value,
-   minus worst-case margin, minus belief update, minus probe.
+   minus worst-case margin, minus belief update, minus probe; and compare the
+   particle and HMM backends under matched compute.
 
 **Joint**
 - Freeze the record schema version and commit a fixture episode as the
