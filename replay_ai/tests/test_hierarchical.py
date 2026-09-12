@@ -15,6 +15,20 @@ def test_hmm_has_exact_forty_states_and_normalized_belief():
     assert set(result.ers_probabilities) == {m.value for m in ERSMode}
 
 
+def test_feature_baseline_uses_prior_laps_in_the_same_sector():
+    extractor = FeatureExtractor(window=5)
+    extractor.update(RivalTelemetry(300, 100, 0, 1.0, sector=0, lap=1))
+    extractor.update(RivalTelemetry(200, 100, 0, 1.0, sector=1, lap=1))
+    # Moving to lap two seals lap one into the causal baseline.
+    same_sector = extractor.update(
+        RivalTelemetry(290, 100, 0, 1.0, sector=0, lap=2))
+    assert same_sector.dv_baseline == -10.0
+    assert same_sector.throttle_clip == 1.0
+    other_sector = extractor.update(
+        RivalTelemetry(200, 100, 0, 1.0, sector=1, lap=2))
+    assert other_sector.dv_baseline == 0.0
+
+
 def test_observation_updates_only_from_current_public_sample():
     model = MotorsportIntelligence()
     first = model.observe(RivalTelemetry(300, 100, 0, 1.0), own_speed_kmh=295)

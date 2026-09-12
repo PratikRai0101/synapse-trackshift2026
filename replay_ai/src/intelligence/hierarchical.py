@@ -14,7 +14,8 @@ import math
 from dataclasses import dataclass
 from enum import Enum
 from itertools import product
-from typing import Dict, Iterable, List, Mapping, Sequence, Tuple
+from collections import defaultdict, deque
+from typing import Deque, Dict, Iterable, List, Mapping, Sequence, Tuple
 
 
 class ERSMode(str, Enum):
@@ -66,6 +67,7 @@ class RivalFeatures:
     brake_delta: float
     speed_variance: float
     aero: float
+    tyre_life: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -82,33 +84,76 @@ class HMMResult:
 
 
 class FeatureExtractor:
-    """Rolling-baseline feature extraction; no future samples are consulted."""
+    """Causal, sector-aligned rolling five-lap feature extraction.
+
+    A baseline made from adjacent samples confounds corners with straights. This
+    extractor only promotes a lap into history after a later lap is observed,
+    and compares each sample with prior completed laps from the same sector.
+    """
 
     def __init__(self, window: int = 5) -> None:
         self.window = max(1, int(window))
-        self._speed: List[float] = []
-        self._gaps: List[float] = []
-        self._brakes: List[float] = []
-        self._previous_gap = 0.0
+        self._current_lap: int | None = None
+        self._current: Dict[int, List[Tuple[float, float]]] = defaultdict(list)
+        self._history: Dict[int, Deque[Tuple[float, float]]] = defaultdict(
+            lambda: deque(maxlen=self.window)
+        )
+        self._sector_speeds: Dict[int, Deque[float]] = defaultdict(
+            lambda: deque(maxlen=50)
+        )
+        self._clip_counts: Dict[Tuple[int, int], List[int]] = defaultdict(
+            lambda: [0, 0]
+        )
+        self._previous_gap: float | None = None
+
+    def _complete_lap(self) -> None:
+        for sector, samples in self._current.items():
+            if samples:
+                speed = sum(value[0] for value in samples) / len(samples)
+                brake = sum(value[1] for value in samples) / len(samples)
+                self._history[sector].append((speed, brake))
+        self._current.clear()
 
     def update(self, o: RivalTelemetry) -> RivalFeatures:
-        speed = float(o.speed_kmh)
-        baseline = sum(self._speed) / len(self._speed) if self._speed else speed
-        gap_delta = self._previous_gap - float(o.gap_s) if self._gaps else 0.0
-        brake_mean = sum(self._brakes) / len(self._brakes) if self._brakes else float(o.brake)
-        speeds = self._speed + [speed]
-        mean = sum(speeds) / len(speeds)
-        variance = sum((x - mean) ** 2 for x in speeds) / len(speeds)
-        # A clip is an observation, not proof of a depleted battery.
-        clip = 1.0 if float(o.throttle_pct) >= 98.0 and speed < baseline - 1.0 else 0.0
-        features = RivalFeatures(speed - baseline, gap_delta, clip,
-                                 float(o.brake) - brake_mean, variance,
-                                 max(0.0, min(1.0, float(o.active_aero))))
-        self._speed = (self._speed + [speed])[-self.window:]
-        self._gaps = (self._gaps + [float(o.gap_s)])[-self.window:]
-        self._brakes = (self._brakes + [float(o.brake)])[-self.window:]
+        lap, sector = int(o.lap), int(o.sector)
+        if self._current_lap is None:
+            self._current_lap = lap
+        elif lap != self._current_lap:
+            self._complete_lap()
+            self._clip_counts.clear()
+            self._current_lap = lap
+
+        speed, brake = float(o.speed_kmh), float(o.brake)
+        history = self._history[sector]
+        baseline_speed = (sum(value[0] for value in history) / len(history)
+                          if history else speed)
+        baseline_brake = (sum(value[1] for value in history) / len(history)
+                          if history else brake)
+        recent = self._sector_speeds[sector]
+        values = tuple(recent) + (speed,)
+        mean = sum(values) / len(values)
+        variance = sum((value - mean) ** 2 for value in values) / len(values)
+
+        # Public telemetry has no explicit straight flag. Full-throttle samples
+        # form the conservative denominator; the result is a duration fraction,
+        # not a one-frame depleted-battery assertion.
+        counts = self._clip_counts[(lap, sector)]
+        if float(o.throttle_pct) >= 98.0:
+            counts[1] += 1
+            if history and speed < baseline_speed - 1.0:
+                counts[0] += 1
+        clipping_fraction = counts[0] / counts[1] if counts[1] else 0.0
+        gap_delta = (self._previous_gap - float(o.gap_s)
+                     if self._previous_gap is not None else 0.0)
         self._previous_gap = float(o.gap_s)
-        return features
+        self._current[sector].append((speed, brake))
+        recent.append(speed)
+        return RivalFeatures(
+            speed - baseline_speed, gap_delta, clipping_fraction,
+            brake - baseline_brake, variance,
+            max(0.0, min(1.0, float(o.active_aero))),
+            max(0.0, float(o.tyre_life)),
+        )
 
 
 class FortyStateHMM:
@@ -176,13 +221,19 @@ class FortyStateHMM:
         n = len(STATES)
         switch = (1.0 - self.self_transition) / (n - 1)
 
+        def factor_transition(previous, current, values, persistence: float) -> float:
+            return (persistence if previous is current else
+                    (1.0 - persistence) / (len(values) - 1))
+
         def transition(previous: HMMState, current: HMMState) -> float:
             if self.mode_transition:
                 row = self.mode_transition.get(previous[0].value, {})
                 mode_probability = row.get(current[0].value, 0.0)
-                # Override and tyre are not labelled by public telemetry here;
-                # distribute their transition mass uniformly.
-                return mode_probability / (len(OverrideMode) * len(TyreState))
+                # Fitted ERS transitions must not erase the unlabelled factors.
+                # Preserve override and tyre persistence until evidence changes it.
+                return (mode_probability *
+                        factor_transition(previous[1], current[1], OverrideMode, 0.97) *
+                        factor_transition(previous[2], current[2], TyreState, 0.985))
             return self.self_transition if previous == current else switch
 
         predicted = {s: sum(self._belief[p] * transition(p, s) for p in STATES)
@@ -196,9 +247,17 @@ class FortyStateHMM:
         )
         for state in STATES:
             closure, clip, brake = self._expected(state, features)
+            tyre_expected = {
+                TyreState.NEW: 2.0,
+                TyreState.LIGHT: 8.0,
+                TyreState.MODERATE: 18.0,
+                TyreState.HEAVY: 30.0,
+                TyreState.CLIFF: 45.0,
+            }[state[2]]
             error = (((features.dgap - closure) / scales[0]) ** 2 +
                      ((features.throttle_clip - clip) / scales[1]) ** 2 +
-                     ((features.brake_delta - brake) / scales[2]) ** 2)
+                     ((features.brake_delta - brake) / scales[2]) ** 2 +
+                     ((features.tyre_life - tyre_expected) / 10.0) ** 2)
             likelihood[state] = math.exp(-0.5 * error)
         weighted = {s: predicted[s] * likelihood[s] for s in STATES}
         total = sum(weighted.values()) or 1.0
@@ -218,18 +277,51 @@ class SOHDecision:
 
 
 class SeasonLifecycleManager:
-    """Small finite-horizon DP for retain/replace battery decisions."""
-    def __init__(self, races: int = 5, replacement_cost: float = 0.18) -> None:
+    """Finite-horizon retain/replace dynamic program over discretized SOH.
+
+    Costs are time-equivalent development parameters, not identified cell or
+    championship-point values. The DP is intentionally small enough to rerun at
+    an event boundary and passes its marginal wear value down to Level 3.
+    """
+    def __init__(self, races: int = 5, replacement_cost: float = 0.18,
+                 degradation_per_race: float = 0.012) -> None:
         self.races = max(1, races)
-        self.replacement_cost = replacement_cost
+        self.replacement_cost = max(0.0, float(replacement_cost))
+        self.degradation_per_race = max(0.0, float(degradation_per_race))
+
+    @staticmethod
+    def _resistance(soh: float, temperature: float) -> float:
+        return 1.0 + (1.0 - soh) * (
+            0.4 + max(0.0, temperature - 60.0) / 500.0)
 
     def decide(self, soh: float, temperature: float = 70.0) -> SOHDecision:
-        soh = max(0.0, min(1.0, soh))
-        resistance = 1.0 + (1.0 - soh) * (0.4 + max(0.0, temperature - 60.0) / 500.0)
-        retain = sum((1.0 - soh) * resistance * (i + 1) / self.races for i in range(self.races))
-        replace = retain > self.replacement_cost
-        return SOHDecision(1.0 if replace else soh, 1.0 if replace else resistance,
-                           self.replacement_cost if replace else retain, replace)
+        from functools import lru_cache
+
+        initial = max(0.0, min(1.0, float(soh)))
+        thermal_multiplier = 1.0 + max(0.0, float(temperature) - 70.0) / 80.0
+        fade = self.degradation_per_race * thermal_multiplier
+
+        @lru_cache(maxsize=None)
+        def value(event: int, soh_percent: int) -> tuple[float, bool]:
+            if event >= self.races:
+                return 0.0, False
+            state = soh_percent / 100.0
+
+            def next_value(start: float) -> float:
+                after = max(0.0, start - fade)
+                future, _ = value(event + 1, int(round(after * 100.0)))
+                running = (1.0 - start) * self._resistance(start, temperature)
+                return running + future
+
+            retain_cost = next_value(state)
+            replace_cost = self.replacement_cost + next_value(1.0)
+            return ((replace_cost, True) if replace_cost < retain_cost
+                    else (retain_cost, False))
+
+        optimal_cost, replace = value(0, int(round(initial * 100.0)))
+        effective_soh = 1.0 if replace else initial
+        resistance = self._resistance(effective_soh, temperature)
+        return SOHDecision(effective_soh, resistance, optimal_cost, replace)
 
 
 @dataclass(frozen=True)
@@ -268,6 +360,7 @@ class MotorsportIntelligence:
         self.level2 = BoundedScenarioPlanner(use_search=use_search,
                                              use_spatial=use_spatial)
         self.lap_map = None
+        self.lap_map_source = "unavailable"
         self.lap_planner = None
         self.last_lap_plan = None
         self.last_soh_decision = None
@@ -277,6 +370,7 @@ class MotorsportIntelligence:
                 from .lap_strategy import LapTimeMap, RaceEnergyPlanner
                 self.lap_map = LapTimeMap.from_file(lap_map_artifact)
                 self.lap_planner = RaceEnergyPlanner(self.lap_map)
+                self.lap_map_source = lap_map_artifact
             except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
                 self.lap_map = None
                 self.lap_planner = None
@@ -292,6 +386,8 @@ class MotorsportIntelligence:
         envelope = getattr(self.last_level2, "envelope", None)
         spatial = getattr(self.last_level2, "spatial_reference", None)
         return {
+            "hmm_source": self.hmm_source,
+            "lap_map_source": self.lap_map_source,
             "battery_soh": soh,
             "battery_resistance": (soh_decision.resistance if soh_decision else
                                     1.0 + (1.0 - soh) * 0.4),

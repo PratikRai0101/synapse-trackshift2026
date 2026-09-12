@@ -21,6 +21,14 @@ def test_different_actions_change_future_vehicle_state():
             conservative.ego.gap_s != aggressive.ego.gap_s)
 
 
+def test_thermal_stress_initializes_the_physical_plant_temperature():
+    sim = ClosedLoopSimulator(HiddenRivalMode.MATCH, scenario="thermal_stress")
+    assert sim.battery_temperature == 105.0
+    assert sim.plant.state.battery_temperature == 105.0
+    sim.step()
+    assert sim.battery_temperature > 100.0
+
+
 def test_closed_loop_applies_zone_mpc_output():
     sim = ClosedLoopSimulator(HiddenRivalMode.DEPLETE)
     sim.step()

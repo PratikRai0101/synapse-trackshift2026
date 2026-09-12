@@ -77,13 +77,20 @@ class ClosedLoopSimulator:
             "energy_stress": (35.0, 0.82, 85.0),
             "thermal_stress": (50.0, 0.88, 105.0),
         }.get(scenario, (70.0, 1.0, 70.0))
+        self.initial_energy = energy
         self.ego = CarState(initial_speed, initial_gap, energy)
         self.rival = CarState(initial_speed, initial_gap, energy)
-        self.plant = VehiclePlant(PlantState(speed_kmh=initial_speed, energy=energy))
+        self.plant = VehiclePlant(PlantState(
+            speed_kmh=initial_speed,
+            energy=energy,
+            battery_temperature=temperature,
+        ))
         self.time_s = 0.0
         self.step_index = 0
         self.current_lap = 1
         self.lap_deployed = 0.0
+        self.cumulative_deployed = 0.0
+        self.cumulative_recovered = 0.0
         self.battery_soh = soh
         self.battery_temperature = temperature
         self.scenario = scenario
@@ -134,14 +141,21 @@ class ClosedLoopSimulator:
         target = decision.lap_energy_target
         target_remaining = max(0.0, (target or 0.0) - self.lap_deployed)
         can_deploy = target is None or target_remaining > 0.0
+        # Level 3 supplies a deployment budget, whereas the MPC accepts a
+        # remaining-energy floor. Convert units/meaning at the layer boundary.
+        reserve_target = (max(5.0, self.ego.energy - target_remaining)
+                          if target is not None else None)
         execution, mpc = self.execution.track_zone(
             decision.lambda_kin, decision.lambda_b, 100.0,
             decision.target_speed_kmh, self.ego.speed_kmh, self.ego.energy,
-            target,
+            reserve_target,
         )
         self.last_mpc_result = mpc
         mpc_fraction = (execution.mpc_power_fraction or 0.0) if self.use_mpc else 1.0
-        regen_fraction = 1.0 if decision.command == "HARVEST" else 0.0
+        strategic_regen = 1.0 if decision.command == "HARVEST" else 0.0
+        regen_fraction = (max(strategic_regen, mpc.regen_fraction)
+                          if self.use_mpc else strategic_regen)
+        brake_fraction = mpc.brake_fraction if self.use_mpc else 0.0
         if decision.command == "BURN" and self.ego.energy > 5.0 and can_deploy:
             power_fraction = mpc_fraction
             deployment = (min(cfg.battery_burn_per_s * power_fraction, target_remaining)
@@ -153,11 +167,14 @@ class ClosedLoopSimulator:
         previous_energy = self.plant.state.energy
         plant_step = self.plant.step(
             power_fraction, cfg.dt_s, curvature,
+            brake_fraction=brake_fraction,
             regen_fraction=regen_fraction,
             slipstream_gap_s=self.ego.gap_s,
             dirty_air_gap_s=self.ego.gap_s,
             ahead_active_aero=1.0,
         )
+        self.cumulative_deployed += self.plant.config.energy_rate * power_fraction * cfg.dt_s
+        self.cumulative_recovered += self.plant.config.regen_rate * regen_fraction * cfg.dt_s
         self.ego.speed_kmh = plant_step.speed_kmh
         self.ego.energy = plant_step.energy
         self.battery_temperature = plant_step.battery_temperature
