@@ -3,9 +3,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import math
 
 from .hierarchical import MotorsportIntelligence, RivalTelemetry, TacticalDecision
 from .control_layers import FastExecutionController
+from .vehicle_plant import PlantState, VehiclePlant
 
 
 class HiddenRivalMode(str, Enum):
@@ -64,6 +66,7 @@ class ClosedLoopSimulator:
         self.rival_mode = rival_mode  # simulation truth; never passed to model
         self.ego = CarState(280.0, 1.0, 70.0)
         self.rival = CarState(280.0, 1.0, 70.0)
+        self.plant = VehiclePlant(PlantState(speed_kmh=280.0, energy=70.0))
         self.time_s = 0.0
         self.step_index = 0
         self.current_lap = 1
@@ -116,28 +119,23 @@ class ClosedLoopSimulator:
         )
         self.last_mpc_result = mpc
         mpc_fraction = execution.mpc_power_fraction or 0.0
+        regen_fraction = 1.0 if decision.command == "HARVEST" else 0.0
         if decision.command == "BURN" and self.ego.energy > 5.0 and can_deploy:
-            ego_accel = cfg.ego_accel_kmh_s + cfg.burn_bonus_kmh_s * mpc_fraction
-            deployment = (min(cfg.battery_burn_per_s * mpc_fraction, target_remaining)
-                          if target is not None else cfg.battery_burn_per_s * mpc_fraction)
-            energy_delta = -deployment
+            power_fraction = mpc_fraction
+            deployment = (min(cfg.battery_burn_per_s * power_fraction, target_remaining)
+                          if target is not None else cfg.battery_burn_per_s * power_fraction)
             self.lap_deployed += deployment * cfg.dt_s
-        elif decision.command == "HARVEST":
-            ego_accel = cfg.ego_accel_kmh_s - cfg.harvest_penalty_kmh_s
-            energy_delta = cfg.battery_harvest_per_s
         else:
-            ego_accel = cfg.ego_accel_kmh_s
-            energy_delta = -cfg.battery_burn_per_s * 0.25
-        self.ego.speed_kmh = max(0.0, self.ego.speed_kmh +
-                                 (ego_accel - cfg.drag_kmh_s) * cfg.dt_s)
-        self.ego.energy = max(0.0, min(100.0, self.ego.energy +
-                                       energy_delta * cfg.dt_s))
-        # Reference SOH fade: sustained throughput increases degradation;
-        # temperature is a simple resistance-growth proxy.
-        throughput = abs(min(0.0, energy_delta)) * cfg.dt_s
+            power_fraction = 0.0
+        curvature = 0.0012 + 0.0008 * math.sin(self.plant.state.distance_m / 180.0)
+        previous_energy = self.plant.state.energy
+        plant_step = self.plant.step(power_fraction, cfg.dt_s, curvature,
+                                     regen_fraction=regen_fraction)
+        self.ego.speed_kmh = plant_step.speed_kmh
+        self.ego.energy = plant_step.energy
+        self.battery_temperature = plant_step.battery_temperature
+        throughput = abs(plant_step.energy - previous_energy)
         self.battery_soh = max(0.60, self.battery_soh - throughput * 0.00005)
-        self.battery_temperature = max(20.0, min(110.0,
-            self.battery_temperature + (throughput * 0.02 - 0.01) * cfg.dt_s))
 
         if self.rival_mode is HiddenRivalMode.CONSERVE:
             rival_accel = cfg.rival_accel_kmh_s + 8.0

@@ -197,6 +197,8 @@ Fitting a pooled within-mode standard deviation per feature
    requires actuator and plant validation before production use.
 7. **The season SOH model is a reference degradation model.** It is a small
    finite-horizon DP with indicative constants, not a validated cell model.
-8. **The closed loop is a development simulator.** It is action-responsive and
-   hides rival mode from the controller, but does not yet model full vehicle
-   geometry, tyres, pit stops, dirty air or real rival strategy.
+8. **The closed loop is a development simulator.** It is action-responsive,
+   now includes curvature-aware combined grip, tyre wear/temperature and
+   battery temperature/resistance proxies, and hides rival mode from the
+   controller. It still does not model full vehicle geometry, pit stops, dirty
+   air or real rival strategy.
