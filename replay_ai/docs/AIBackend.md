@@ -200,7 +200,7 @@ Fitting a pooled within-mode standard deviation per feature
 7. **The season SOH model is a reference degradation model.** It is a small
    finite-horizon DP with indicative constants, not a validated cell model.
 8. **The closed loop is a development simulator.** It is action-responsive,
-   now includes curvature-aware combined grip, tyre wear/temperature and
-   battery temperature/resistance proxies, and hides rival mode from the
-   controller. It still does not model full vehicle geometry, pit stops, dirty
-   air or real rival strategy.
+   now includes curvature-aware combined grip, tyre wear/temperature, battery
+   temperature/resistance, fuel mass, slipstream, dirty-air loss, pit events,
+   geometric pass/contact checks and reactive defence. It still requires
+   calibration against real vehicle data and richer multi-car strategy.
