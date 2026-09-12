@@ -39,7 +39,7 @@ RGB = Tuple[int, int, int]
 class RaceEngineerHUD:
     """Draws the Race Engineer decision panel for the focus driver."""
 
-    def __init__(self, width: float = 820.0, height: float = 168.0, bottom_y: float = 130.0):
+    def __init__(self, width: float = 820.0, height: float = 222.0, bottom_y: float = 130.0):
         self.width = width
         self.height = height
         self.bottom_y = bottom_y
@@ -177,6 +177,24 @@ class RaceEngineerHUD:
                 f"SOH {soh:.3f}  R {resistance:.3f}  SOCP {status} "
                 f"res {residual if residual is not None else 'n/a'}",
                 left + pad, top - 160, 9, MUTED,
+            )
+            risk_values = metrics.get("scenario_risk_values", {})
+            risk_text = "  ".join(f"{key[:3]} {value:+.2f}"
+                                  for key, value in risk_values.items())
+            self._t(
+                "pomcp_metrics",
+                f"POMCP particles {metrics.get('scenario_particles', 0)} "
+                f"histories {metrics.get('scenario_histories', 0)}  {risk_text}",
+                left + pad, top - 180, 9, MUTED,
+            )
+            profile = metrics.get("spatial_speed_profile", [])
+            profile_text = " ".join(f"{value:.0f}" for value in profile[:5])
+            self._t(
+                "spatial_metrics",
+                f"PROFILE km/h [{profile_text}]  "
+                f"costate {len(metrics.get('kinetic_costates', []))} "
+                f"res {metrics.get('spatial_residual', 'n/a')}",
+                left + pad, top - 200, 9, MUTED,
             )
 
     # -- helpers ------------------------------------------------------------

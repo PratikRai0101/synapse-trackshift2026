@@ -305,6 +305,18 @@ class MotorsportIntelligence:
                                if envelope else None)),
             "scenario_values": (dict(self.last_level2.search_values)
                                  if self.last_level2 else {}),
+            "scenario_risk_values": (dict(self.last_level2.search_risk_values or {})
+                                     if self.last_level2 else {}),
+            "scenario_particles": (self.last_level2.search_particles
+                                    if self.last_level2 else 0),
+            "scenario_histories": (self.last_level2.search_histories
+                                    if self.last_level2 else 0),
+            "spatial_speed_profile": (list(self.last_level2.reference_speed_kmh)
+                                       if self.last_level2 else []),
+            "kinetic_costates": (list(self.last_level2.lambda_kin)
+                                  if self.last_level2 else []),
+            "spatial_residual": (self.last_level2.spatial_residual
+                                  if self.last_level2 else None),
         }
 
     def plan_lap(self, lap: int, energy: float, tyre_wear: float = 0.0,
