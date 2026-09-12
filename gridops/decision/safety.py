@@ -35,12 +35,21 @@ SPEED_TRACKING_GAIN = 1.5
 class ContactGuard:
     track: Track
     footprint: Footprint = Footprint()
+    margin_m: float = 0.0
     dt_s: float = 0.05
     speed_search_step_mps: float = 1.0
     _path: TrackPath = field(init=False)
+    _inflated: Footprint = field(init=False)
 
     def __post_init__(self) -> None:
         self._path = TrackPath(self.track)
+        # Declared model-error margin. The projection is optimistic under
+        # parameter shift, so the guard checks an inflated footprint: a plan is
+        # only accepted if it clears the rival by this margin as well.
+        self._inflated = Footprint(
+            self.footprint.length_m + 2.0 * self.margin_m,
+            self.footprint.width_m + 2.0 * self.margin_m,
+        )
 
     # -- projection --------------------------------------------------------
     def _project(
@@ -68,8 +77,8 @@ class ContactGuard:
             delta = ego_lat_target - l_e
             l_e += max(-LATERAL_RATE_MPS * self.dt_s, min(LATERAL_RATE_MPS * self.dt_s, delta))
             s_r += rival_v * self.dt_s
-            ego_rect = footprint_corners(self._path.pose_at(s_e, l_e), self.footprint)
-            rival_rect = footprint_corners(self._path.pose_at(s_r, l_r), self.footprint)
+            ego_rect = footprint_corners(self._path.pose_at(s_e, l_e), self._inflated)
+            rival_rect = footprint_corners(self._path.pose_at(s_r, l_r), self._inflated)
             if rectangles_overlap(ego_rect, rival_rect):
                 return True
         return False

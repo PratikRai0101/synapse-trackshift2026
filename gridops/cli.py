@@ -26,7 +26,13 @@ from .evaluation.controllers import (
     ReferenceController,
     StationaryPlanner,
 )
-from .evaluation.batch import ABLATION_NAMES, CONTROLLER_NAMES, default_manifest, run_batch
+from .evaluation.batch import (
+    ABLATION_NAMES,
+    CONTACT_MARGIN_M,
+    CONTROLLER_NAMES,
+    default_manifest,
+    run_batch,
+)
 from .evaluation.calibration import calibrate
 from .evaluation.report import build_bundle, render_markdown
 from .evaluation.runner import EpisodeConfig, EpisodeRunner
@@ -167,6 +173,25 @@ def _build_runner(data: dict[str, Any], split: str = "development") -> EpisodeRu
     )
 
 
+def _print_timeline(report) -> None:
+    """Human-readable decision timeline for one episode."""
+    print(
+        f"{report.run_mode}  duration={report.duration_s:.0f}s  "
+        f"decisions={len(report.decisions)}"
+    )
+    print(f"{'t s':>6s} {'family':>14s} {'status':>17s} {'gap m':>7s} {'P kW':>7s}  reasons")
+    for d in report.decisions:
+        print(
+            f"{d['time_s']:6.1f} {d['family']:>14s} {d['status']:>17s} "
+            f"{d['gap_m']:7.2f} {d['p_k_dc_w'] / 1000.0:7.1f}  {','.join(d['reason_codes'])}"
+        )
+    print(
+        f"\nfinal gap {report.final_gap_m:.2f} m | energy spent "
+        f"{report.ego_energy_spent_j / 1e6:.3f} MJ | passes {report.pass_events} | "
+        f"catch-ups {report.catch_up_events} | contacts {report.contacts}"
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="gridops")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -192,6 +217,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     run.add_argument("--rival-policy", default=None)
     run.add_argument("--seed", type=int, default=1)
+    run.add_argument("--show", action="store_true", help="print the decision timeline")
 
     bench = sub.add_parser("benchmark", help="paired controller x rival-policy batch")
     bench.add_argument("path")
@@ -209,6 +235,10 @@ def main(argv: list[str] | None = None) -> int:
     batch.add_argument("--controllers", default=None, help="comma-separated")
     batch.add_argument("--policies", default=None, help="comma-separated")
     batch.add_argument("--no-calibrate", action="store_true")
+    batch.add_argument(
+        "--contact-margin", type=float, default=CONTACT_MARGIN_M,
+        help="declared model-error margin for the contact projection (metres)",
+    )
     batch.add_argument("--out", default=None)
 
     report = sub.add_parser("report", help="build the pitch evidence bundle")
@@ -237,7 +267,10 @@ def main(argv: list[str] | None = None) -> int:
             rival_policy=RivalPolicy(policy_name),
             seed=args.seed,
         )
-        print(json.dumps(report.summary(), indent=2))
+        if args.show:
+            _print_timeline(report)
+        else:
+            print(json.dumps(report.summary(), indent=2))
         return 0
 
     if args.command == "benchmark":
@@ -278,7 +311,10 @@ def main(argv: list[str] | None = None) -> int:
             controllers=controllers,
             policies=policies,
         )
-        result = run_batch(manifest, lambda: _build_runner(data, args.split), calibration)
+        result = run_batch(
+            manifest, lambda: _build_runner(data, args.split), calibration,
+            contact_margin_m=args.contact_margin,
+        )
         payload = result.to_dict()
         if args.out:
             Path(args.out).write_text(json.dumps(payload, indent=2))
