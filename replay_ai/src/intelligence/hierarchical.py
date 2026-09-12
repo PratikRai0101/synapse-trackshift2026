@@ -244,7 +244,8 @@ class TacticalDecision:
 
 class MotorsportIntelligence:
     """End-to-end sector/lap facade consumed by replay and training scripts."""
-    def __init__(self, hmm_artifact: str | None = None) -> None:
+    def __init__(self, hmm_artifact: str | None = None,
+                 lap_map_artifact: str | None = None) -> None:
         self.features = FeatureExtractor()
         self.hmm_source = "default"
         if hmm_artifact:
@@ -261,11 +262,35 @@ class MotorsportIntelligence:
         # inference component without introducing a module cycle.
         from .control_layers import BoundedScenarioPlanner
         self.level2 = BoundedScenarioPlanner()
+        self.lap_map = None
+        self.lap_planner = None
+        self.last_lap_plan = None
+        self._planned_lap = None
+        if lap_map_artifact:
+            try:
+                from .lap_strategy import LapTimeMap, RaceEnergyPlanner
+                self.lap_map = LapTimeMap.from_file(lap_map_artifact)
+                self.lap_planner = RaceEnergyPlanner(self.lap_map)
+            except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+                self.lap_map = None
+                self.lap_planner = None
         self.last_hmm: HMMResult | None = None
         self.last_level2 = None
 
+    def plan_lap(self, lap: int, energy: float, tyre_wear: float = 0.0):
+        """Re-plan the remaining configured horizon at a lap boundary."""
+        if self.lap_planner is None:
+            return None
+        if self._planned_lap == lap and self.last_lap_plan is not None:
+            return self.last_lap_plan
+        self.last_lap_plan = self.lap_planner.plan(energy, tyre_wear)
+        self._planned_lap = lap
+        return self.last_lap_plan
+
     def observe(self, observation: RivalTelemetry, own_speed_kmh: float = 0.0,
                 own_soc: float = 70.0, gap_s: float | None = None) -> TacticalDecision:
+        if self.lap_planner is not None:
+            self.plan_lap(observation.lap, own_soc, observation.tyre_life)
         result = self.hmm.update(self.features.update(observation))
         self.last_hmm = result
         observed_gap = gap_s if gap_s is not None else observation.gap_s

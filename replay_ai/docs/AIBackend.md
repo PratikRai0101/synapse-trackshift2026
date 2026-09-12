@@ -57,17 +57,20 @@ the first means *do not attack*, the second means *attack now*.
 
 ## Runtime artifact loading
 
-The replay loads the calibrated artifact from
-`artifacts/hmm-emissions.json` by default. Override it without changing code:
+The replay loads the calibrated HMM artifact from
+`artifacts/hmm-emissions.json` and the fitted Level 3 map from
+`artifacts/lap-time-map.json` by default. Override either without changing code:
 
 ```sh
 HMM_EMISSIONS_ARTIFACT=artifacts/hmm-emissions.json \
+LAP_TIME_MAP_ARTIFACT=artifacts/lap-time-map.json \
   .venv/bin/python main.py
 ```
 
 A missing or invalid artifact falls back to the default reference HMM so the
-replay still starts. The active source is exposed as `hmm_source` for reports
-and benchmark records.
+replay still starts. The active sources are exposed as `hmm_source` and the lap planner is
+re-evaluated once at each observed lap boundary. The first planned lap's
+battery target is shown in the replay HUD.
 
 Compare runtime behaviour explicitly:
 

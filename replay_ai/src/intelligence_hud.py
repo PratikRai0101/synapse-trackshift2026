@@ -158,7 +158,11 @@ class RaceEngineerHUD:
                 for key in ("H", "M", "Lharvest", "Lderate")
             )
             command = tactical.command if tactical is not None else "INFERENCE"
-            self._t("advice", f"{command}  |  {probability_text}", left + pad, y, 10, TEXT)
+            lap_plan = getattr(report, "lap_plan", None)
+            energy_target = (f"  LAP DEP {lap_plan[0].deploy_energy:.1f}"
+                             if lap_plan else "")
+            self._t("advice", f"{command}  |  {probability_text}{energy_target}",
+                    left + pad, y, 10, TEXT)
         else:
             self._t("advice", report.advice.reason, left + pad, y, 11, TEXT)
 

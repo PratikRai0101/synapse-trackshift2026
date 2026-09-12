@@ -108,7 +108,11 @@ class F1RaceReplayWindow(arcade.Window):
         # Hierarchical public-telemetry backend.  FastF1 has no battery/SOC
         # channel, so the HMM output remains an explicitly labelled belief.
         hmm_artifact = os.environ.get("HMM_EMISSIONS_ARTIFACT", "artifacts/hmm-emissions.json")
-        self.motorsport_intelligence = MotorsportIntelligence(hmm_artifact=hmm_artifact)
+        lap_map_artifact = os.environ.get("LAP_TIME_MAP_ARTIFACT", "artifacts/lap-time-map.json")
+        self.motorsport_intelligence = MotorsportIntelligence(
+            hmm_artifact=hmm_artifact,
+            lap_map_artifact=lap_map_artifact,
+        )
         self.race_engineer_hud = RaceEngineerHUD()
         self._energy_cache = {}
         self._focus_gap_ahead_s = None
@@ -1486,6 +1490,7 @@ class F1RaceReplayWindow(arcade.Window):
                 gap_s=gap_ahead_s,
             )
             report.rival_hmm = self.motorsport_intelligence.last_hmm
+            report.lap_plan = self.motorsport_intelligence.last_lap_plan
         return report
 
     def update_scaling(self, screen_w, screen_h):
