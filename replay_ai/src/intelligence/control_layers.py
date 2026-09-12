@@ -83,9 +83,14 @@ class BoundedScenarioPlanner:
         p = hmm.ers_probabilities
         reserve_value = max(0.0, energy - 5.0) * 0.02
         actions = (
-            ("BURN", 12.0, 0.12, p[ERSMode.DERATE.value] * 2.0),
-            ("HARVEST", -4.0, -0.03, p[ERSMode.HARVEST.value] * 2.0),
-            ("PROACTIVE TRAP", 3.0, 0.02, (1.0 - p[ERSMode.DERATE.value]) * 0.5),
+            # Evidence gates are intentional: a continuation value alone must
+            # not turn every weak posterior into HARVEST or BURN.
+            ("BURN", 12.0, 0.12,
+             p[ERSMode.DERATE.value] * 2.0 if gap_s < 1.0 and energy > 20.0 else -1.0),
+            ("HARVEST", -4.0, -0.03,
+             p[ERSMode.HARVEST.value] * 2.0 if p[ERSMode.HARVEST.value] >= 0.40 or energy < 30.0 else -1.0),
+            ("PROACTIVE TRAP", 3.0, 0.02,
+             (1.0 - p[ERSMode.DERATE.value]) * 0.5),
         )
         scored = []
         for command, cost, gap_gain, belief_value in actions:
