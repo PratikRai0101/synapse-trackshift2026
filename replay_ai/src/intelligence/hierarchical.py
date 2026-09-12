@@ -113,11 +113,13 @@ class FeatureExtractor:
 class FortyStateHMM:
     """Forward HMM over ERS x override x tyre (4 x 2 x 5 = 40 states)."""
 
-    def __init__(self, self_transition: float = 0.92, sigma: float = 1.0) -> None:
+    def __init__(self, self_transition: float = 0.92, sigma: float = 1.0,
+                 emission_means: Mapping[str, Mapping[str, float]] | None = None) -> None:
         self.sigma = max(1e-6, float(sigma))
         self.self_transition = max(0.0, min(1.0, float(self_transition)))
         self._belief: Dict[HMMState, float] = {s: 1.0 / len(STATES) for s in STATES}
         self._extractor = FeatureExtractor()
+        self.emission_means = dict(emission_means or {})
 
     def observe(self, observation: RivalTelemetry) -> HMMResult:
         """Extract causal features and process one sector observation."""
@@ -131,11 +133,16 @@ class FortyStateHMM:
         ers, override, tyre = state
         # Means are interpretable initial priors and should be fitted on labelled
         # telemetry before being presented as a validated physical estimator.
-        closure = {ERSMode.HIGH: .10, ERSMode.MEDIUM: .03,
-                   ERSMode.HARVEST: -.05, ERSMode.DERATE: .16}[ers]
-        clip = {ERSMode.HIGH: 0.00, ERSMode.MEDIUM: .05,
-                ERSMode.HARVEST: .08, ERSMode.DERATE: .55}[ers]
-        brake = .10 if override is OverrideMode.SPENT else 0.0
+        defaults = {
+            ERSMode.HIGH.value: {"dgap": .10, "throttle_clip": .00, "brake_delta": 0.0},
+            ERSMode.MEDIUM.value: {"dgap": .03, "throttle_clip": .05, "brake_delta": 0.0},
+            ERSMode.HARVEST.value: {"dgap": -.05, "throttle_clip": .08, "brake_delta": 0.0},
+            ERSMode.DERATE.value: {"dgap": .16, "throttle_clip": .55, "brake_delta": 0.0},
+        }
+        means = {**defaults.get(ers.value, {}), **self.emission_means.get(ers.value, {})}
+        closure = means["dgap"]
+        clip = means["throttle_clip"]
+        brake = means["brake_delta"] + (.10 if override is OverrideMode.SPENT else 0.0)
         return closure, clip, brake
 
     def update(self, features: RivalFeatures) -> HMMResult:
