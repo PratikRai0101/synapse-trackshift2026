@@ -28,6 +28,7 @@ from .evaluation.controllers import (
 )
 from .evaluation.batch import ABLATION_NAMES, CONTROLLER_NAMES, default_manifest, run_batch
 from .evaluation.calibration import calibrate
+from .evaluation.report import build_bundle, render_markdown
 from .evaluation.runner import EpisodeConfig, EpisodeRunner
 from .race_value.lap_map import default_terminal_value
 from .simulation.rivals import RivalPolicy
@@ -196,6 +197,11 @@ def main(argv: list[str] | None = None) -> int:
     batch.add_argument("--no-calibrate", action="store_true")
     batch.add_argument("--out", default=None)
 
+    report = sub.add_parser("report", help="build the pitch evidence bundle")
+    report.add_argument("batches", nargs="+")
+    report.add_argument("--out", default=None)
+    report.add_argument("--markdown", default=None)
+
     args = parser.parse_args(argv)
 
     if args.command == "validate-config":
@@ -260,6 +266,17 @@ def main(argv: list[str] | None = None) -> int:
         if args.out:
             Path(args.out).write_text(json.dumps(payload, indent=2))
         print(json.dumps({"manifest": payload["manifest"], "aggregate": payload["aggregate"]}, indent=2))
+        return 0
+
+    if args.command == "report":
+        batches = [json.loads(Path(path).read_text()) for path in args.batches]
+        bundle = build_bundle(batches)
+        if args.out:
+            Path(args.out).write_text(json.dumps(bundle, indent=2))
+        markdown = render_markdown(bundle)
+        if args.markdown:
+            Path(args.markdown).write_text(markdown)
+        print(markdown)
         return 0
 
     return 2
