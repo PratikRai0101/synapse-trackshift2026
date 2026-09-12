@@ -11,7 +11,7 @@ import { computeBounds, trackHeading } from "./world";
  * Two cameras in one component.
  *
  * `orbit` is the overview: framed to the whole circuit once geometry arrives.
- * `follow` chases the race leader.
+ * `follow` chases the selected driver, or the race leader in automatic mode.
  *
  * The follow camera reads position and heading from the shared actor state that
  * also drives the car meshes, so it frames exactly the transform being drawn.
@@ -27,6 +27,7 @@ const FOLLOW_BACK = 22;
 const FOLLOW_UP = 8;
 const FOLLOW_LOOKAHEAD = 10;
 const CAMERA_LAG = 8;
+const LOOK_LAG = 10;
 /** Time constant for aligning the chase camera with the track direction. */
 const HEADING_LAG = 6;
 
@@ -45,8 +46,9 @@ export function CameraRig() {
   const camera = useThree((state) => state.camera);
   const controls = useRef<ComponentRef<typeof OrbitControls>>(null);
   const framed = useRef(false);
-  const lastLeader = useRef<string | null>(null);
+  const lastTarget = useRef<string | null>(null);
   const cameraHeading = useRef(0);
+  const cameraLook = useRef(new THREE.Vector3());
 
   const scratch = useMemo(
     () => ({
@@ -90,21 +92,24 @@ export function CameraRig() {
   useFrame((_, delta) => {
     if (mode !== "follow") return;
 
-    const { drivers, origin, carScale, geometry: trackGeometry } =
-      useViewerStore.getState();
+    const {
+      drivers,
+      origin,
+      carScale,
+      geometry: trackGeometry,
+      followedDriver,
+    } = useViewerStore.getState();
     if (!drivers || !origin) return;
 
-    let code: string | null = null;
-    let leader: (typeof drivers)[string] | null = null;
-    for (const [driverCode, driver] of Object.entries(drivers)) {
-      if (driver.position === 1) {
-        code = driverCode;
-        leader = driver;
-        break;
-      }
+    let code = followedDriver && drivers[followedDriver] ? followedDriver : null;
+    if (!code) {
+      code =
+        Object.entries(drivers).find(([, driver]) => driver.position === 1)?.[0] ??
+        null;
     }
-    if (!code || !leader) return;
+    if (!code) return;
 
+    const driver = drivers[code];
     const actor = getActor(code);
     if (!actor) return;
 
@@ -113,14 +118,14 @@ export function CameraRig() {
     // is smooth by construction. Falling back to the car keeps the safety car
     // (which has no `fraction`) working.
     const tangent =
-      trackGeometry && trackHeading(leader.fraction, trackGeometry);
+      trackGeometry && trackHeading(driver.fraction, trackGeometry);
     const targetHeading = tangent ?? actor.heading;
 
     const dt = Math.min(delta, 0.1);
-    const isNewLeader = lastLeader.current !== code;
-    if (isNewLeader) {
+    const isNewTarget = lastTarget.current !== code;
+    if (isNewTarget) {
       cameraHeading.current = targetHeading;
-      lastLeader.current = code;
+      lastTarget.current = code;
     } else {
       const headingAlpha = 1 - Math.exp(-dt * HEADING_LAG);
       cameraHeading.current +=
@@ -139,15 +144,20 @@ export function CameraRig() {
       .set(px, 1.4, pz)
       .addScaledVector(scratch.forward, FOLLOW_LOOKAHEAD);
 
-    if (isNewLeader) {
-      // The lead changed: snap rather than sweeping across the circuit.
+    if (isNewTarget) {
+      // The target changed: snap rather than sweeping across the circuit.
       camera.position.copy(scratch.desired);
+      cameraLook.current.copy(scratch.look);
     } else {
-      const alpha = 1 - Math.exp(-dt * CAMERA_LAG);
-      camera.position.lerp(scratch.desired, alpha);
+      const positionAlpha = 1 - Math.exp(-dt * CAMERA_LAG);
+      const lookAlpha = 1 - Math.exp(-dt * LOOK_LAG);
+      camera.position.lerp(scratch.desired, positionAlpha);
+      cameraLook.current.lerp(scratch.look, lookAlpha);
     }
 
-    camera.lookAt(scratch.look);
+    // Smoothing the look target as well as camera position prevents telemetry
+    // ticks from becoming tiny but visible orientation kicks.
+    camera.lookAt(cameraLook.current);
   });
 
   if (mode !== "orbit") return null;

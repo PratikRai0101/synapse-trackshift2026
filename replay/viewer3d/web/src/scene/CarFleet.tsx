@@ -4,6 +4,7 @@ import * as THREE from "three";
 import { buildCarParts, SAFETY_CAR_COLOR } from "./carParts";
 import { simulateActors, type ActorEntry } from "./actors";
 import { useViewerStore } from "../state/store";
+import { trackHeading } from "./world";
 
 /**
  * All cars in one set of `InstancedMesh`es, one mesh per car part, plus a
@@ -160,6 +161,9 @@ export function CarFleet() {
         x: driver.x,
         y: driver.y,
         scale: 1,
+        heading: store.geometry
+          ? trackHeading(driver.fraction, store.geometry)
+          : null,
         color: cachedColor(store.driverColors[code] ?? "#9aa4b2"),
       });
     }

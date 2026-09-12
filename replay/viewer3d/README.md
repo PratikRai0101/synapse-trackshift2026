@@ -76,8 +76,10 @@ Environment overrides: `TELEMETRY_PORT` (9999), `WS_PORT` (9998),
 
 | Control | Effect |
 |---|---|
-| `CAM` | Toggle `ORBIT` (free orbit over the circuit) / `FOLLOW` (chase the leader) |
-| `SIZE` | Car scale: 1x, 2x, 3x, 5x, 8x |
+| `CAM` | Toggle `ORBIT` (free orbit over the circuit) / `FOLLOW` (chase camera) |
+| `FOLLOW` | Show the chase target; click it to return to the live leader |
+| Leaderboard row | Follow that driver immediately |
+| `SIZE` | Car scale: 1x, 1.5x, 2x, 3x, 5x |
 | `LABELS` | Driver code tags above each car |
 
 ### Why cars are scaled up
@@ -103,7 +105,9 @@ renderer.
 The **CAM** button in the HUD toggles between:
 
 - `ORBIT` — free orbit over the whole circuit (drag / scroll).
-- `FOLLOW` — chases the race leader from behind and above.
+- `FOLLOW` — chases the selected driver from behind and above. Click any
+  leaderboard row to select a car, or click **FOLLOW** to return to the live
+  race leader.
 
 ## Swapping in a real car model
 
@@ -130,14 +134,15 @@ The JSON payload from `_broadcast_telemetry_state()` is the only contract:
 
 - **No elevation.** FastF1 telemetry carries no reliable height, so the circuit
   is flat.
-- **Heading is derived** from the position delta between frames. It is smoothed,
-  but can wobble at very low speed.
+- **Heading uses the track tangent** when lap fraction and geometry are
+  available, with a smoothed position-delta fallback for incomplete telemetry.
 - **High playback speeds** (64x+) make cars jump large distances per tick; jumps
   beyond 250 m are applied instantly rather than interpolated.
 - **Race sessions only.** `run_qualifying_replay` never starts the telemetry
   server, so there is nothing to consume for qualifying.
-- **Bunched packs overlap** at high car scales, since the models are larger than
-  the gaps between cars at race starts.
+- **Bunched packs can overlap at enlarged car scales**, since those models are
+  intentionally larger than real racing gaps. The default 1x scale preserves
+  physical spacing.
 
 ## Troubleshooting the renderer
 
@@ -155,7 +160,7 @@ the circuit partially disappearing at orbit distance. Do not remove it from the
 Canvas `gl` props, and keep `near` well above 1.
 
 **Chase-camera heading comes from the track, not the car.** The follow camera
-takes its direction of travel from the centreline tangent at the leader's
+takes its direction of travel from the centreline tangent at the followed car's
 `fraction` (`trackHeading()` in `scene/world.ts`), falling back to the car's own
 smoothed yaw only when `fraction` is unavailable.
 

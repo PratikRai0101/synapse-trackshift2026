@@ -22,6 +22,35 @@ export interface TrackBounds {
   depth: number;
 }
 
+interface TrackDistances {
+  lengths: Float64Array;
+  total: number;
+}
+
+const trackDistanceCache = new WeakMap<TrackGeometry, TrackDistances>();
+
+function trackDistances(geometry: TrackGeometry): TrackDistances {
+  const cached = trackDistanceCache.get(geometry);
+  if (cached) return cached;
+
+  const count = geometry.x.length;
+  const lengths = new Float64Array(count);
+  let total = 0;
+  for (let index = 0; index < count; index += 1) {
+    const next = (index + 1) % count;
+    const length = Math.hypot(
+      geometry.x[next] - geometry.x[index],
+      geometry.y[next] - geometry.y[index],
+    );
+    lengths[index] = length;
+    total += length;
+  }
+
+  const distances = { lengths, total };
+  trackDistanceCache.set(geometry, distances);
+  return distances;
+}
+
 export function computeBounds(geometry: TrackGeometry): TrackBounds {
   let minX = Infinity;
   let maxX = -Infinity;
@@ -52,8 +81,8 @@ export function computeBounds(geometry: TrackGeometry): TrackBounds {
  * The centreline is a smooth, noise-free curve, whereas a per-frame position
  * delta is dominated by floating-point noise at low speed. A chase camera wants
  * the direction of travel along the track, so this is a far more stable source
- * than the car's own yaw. Interpolated between stations so the quantised index
- * does not produce steps.
+ * than the car's own yaw. Fractions are resolved by cumulative segment length,
+ * not point index, because real centreline samples are not uniformly spaced.
  */
 export function trackHeading(
   fraction: number,
@@ -62,29 +91,29 @@ export function trackHeading(
   const count = geometry.x.length;
   if (count < 3 || !Number.isFinite(fraction)) return null;
 
+  // `fraction` is distance around the lap. Track samples are not necessarily
+  // uniformly spaced, so multiplying it by `count` can select the wrong part
+  // of the circuit and make the chase camera abruptly turn across the track.
+  const { lengths, total } = trackDistances(geometry);
+  if (total === 0) return null;
+
   const wrapped = ((fraction % 1) + 1) % 1;
-  const position = wrapped * count;
-  const base = Math.floor(position) % count;
-  const nextIndex = (base + 1) % count;
-  const blend = position - Math.floor(position);
+  const targetDistance = wrapped * total;
+  let travelled = 0;
 
-  // Tangent at a station runs from the previous to the next point.
-  const tangentX = (index: number) => {
-    const prev = (index - 1 + count) % count;
-    const next = (index + 1) % count;
-    return geometry.x[next] - geometry.x[prev];
-  };
-  const tangentY = (index: number) => {
-    const prev = (index - 1 + count) % count;
-    const next = (index + 1) % count;
-    return geometry.y[next] - geometry.y[prev];
-  };
+  for (let index = 0; index < count; index += 1) {
+    const length = lengths[index];
+    if (length > 0 && travelled + length >= targetDistance) {
+      const next = (index + 1) % count;
+      return Math.atan2(
+        geometry.x[next] - geometry.x[index],
+        geometry.y[next] - geometry.y[index],
+      );
+    }
+    travelled += length;
+  }
 
-  const x = tangentX(base) + (tangentX(nextIndex) - tangentX(base)) * blend;
-  const y = tangentY(base) + (tangentY(nextIndex) - tangentY(base)) * blend;
-  if (x === 0 && y === 0) return null;
-
-  return Math.atan2(x, y);
+  return null;
 }
 
 /**
