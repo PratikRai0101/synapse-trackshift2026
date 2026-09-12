@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 import math
+import random
 
 from .hierarchical import MotorsportIntelligence, RivalTelemetry, TacticalDecision
 from .control_layers import FastExecutionController
@@ -61,12 +62,17 @@ class ClosedLoopSimulator:
     def __init__(self, rival_mode: HiddenRivalMode = HiddenRivalMode.MATCH,
                  config: SimulationConfig | None = None,
                  hmm_artifact: str | None = None,
-                 lap_map_artifact: str | None = None) -> None:
+                 lap_map_artifact: str | None = None,
+                 seed: int = 0,
+                 use_mpc: bool = True) -> None:
         self.config = config or SimulationConfig()
         self.rival_mode = rival_mode  # simulation truth; never passed to model
-        self.ego = CarState(280.0, 1.0, 70.0)
-        self.rival = CarState(280.0, 1.0, 70.0)
-        self.plant = VehiclePlant(PlantState(speed_kmh=280.0, energy=70.0))
+        rng = random.Random(seed)
+        initial_speed = 275.0 + rng.random() * 10.0
+        initial_gap = 0.8 + rng.random() * 0.4
+        self.ego = CarState(initial_speed, initial_gap, 70.0)
+        self.rival = CarState(initial_speed, initial_gap, 70.0)
+        self.plant = VehiclePlant(PlantState(speed_kmh=initial_speed, energy=70.0))
         self.time_s = 0.0
         self.step_index = 0
         self.current_lap = 1
@@ -76,6 +82,7 @@ class ClosedLoopSimulator:
         self.model = MotorsportIntelligence(hmm_artifact=hmm_artifact,
                                              lap_map_artifact=lap_map_artifact)
         self.execution = FastExecutionController()
+        self.use_mpc = use_mpc
         self.last_mpc_result = None
         self.rival_defending = False
 
@@ -119,7 +126,7 @@ class ClosedLoopSimulator:
             target,
         )
         self.last_mpc_result = mpc
-        mpc_fraction = execution.mpc_power_fraction or 0.0
+        mpc_fraction = (execution.mpc_power_fraction or 0.0) if self.use_mpc else 1.0
         regen_fraction = 1.0 if decision.command == "HARVEST" else 0.0
         if decision.command == "BURN" and self.ego.energy > 5.0 and can_deploy:
             power_fraction = mpc_fraction
