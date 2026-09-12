@@ -1,19 +1,14 @@
-# GRID//OPS — energy and overtake decision support
+# AI Motorsport Intelligence Replay
 
-This workspace currently contains research and development specifications, not a validated racing controller.
+This repository contains two copies of the F1 race replay application:
 
-**Start here: [corrected development package](docs/development/README.md).** It contains the PRD, four-horizon architecture, physical models, data contracts, validation protocol, two-person 24-hour build path, proposed tickets, glossary, novelty analysis and pitch references.
+- [`replay/`](replay/) — the untouched replay baseline.
+- [`replay_ai/`](replay_ai/) — the canonical AI Motorsport Intelligence implementation.
 
-For a fresh implementation session, use the [developer handoff](docs/development/12-developer-handoff.md). Domain terminology lives in [CONTEXT.md](CONTEXT.md). The main acceptance seam is a complete action-responsive simulation episode with hidden rival truth inaccessible to the controller.
+All active model, simulation, training, evaluation, and dashboard development belongs in
+`replay_ai/`. The retired experimental engine and its documentation remain available in
+Git history and are intentionally not part of the current product.
 
-The older HTML in `outputs/` is illustrative. Its displayed scores, confidence and timings are not measured research results. Earlier proposals and literature notes remain background; the corrected package takes precedence where implementation guidance conflicts.
-
-No external issues have been published, no organizer permissions have been assumed, and no application dependencies were installed by the documentation task. Proposed decisions/backlog remain subject to review.
-
-Documentation checks can be repeated with:
-
-```sh
-node work/validate-development-docs.mjs
-```
-
-These checks validate document structure and references only—not vehicle physics, algorithm performance or real-world compliance.
+See [`replay_ai/README.md`](replay_ai/README.md) and
+[`replay_ai/docs/AIBackend.md`](replay_ai/docs/AIBackend.md) for setup and current model
+capabilities.
