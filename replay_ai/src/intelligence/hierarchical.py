@@ -230,23 +230,32 @@ class MotorsportIntelligence:
         self.features = FeatureExtractor()
         self.hmm = FortyStateHMM()
         self.lifecycle = SeasonLifecycleManager()
+        # Imported lazily to keep the HMM module usable as a small standalone
+        # inference component without introducing a module cycle.
+        from .control_layers import BoundedScenarioPlanner
+        self.level2 = BoundedScenarioPlanner()
         self.last_hmm: HMMResult | None = None
+        self.last_level2 = None
 
     def observe(self, observation: RivalTelemetry, own_speed_kmh: float = 0.0,
                 own_soc: float = 70.0, gap_s: float | None = None) -> TacticalDecision:
         result = self.hmm.update(self.features.update(observation))
         self.last_hmm = result
-        p = result.ers_probabilities
-        # Continuation-aware tactical rule: do not attack a likely counter-harvest.
-        if p[ERSMode.HARVEST.value] >= 0.40:
-            command, reason = "HARVEST", "rival may be hoarding energy"
-        elif p[ERSMode.DERATE.value] >= 0.40 and (gap_s if gap_s is not None else observation.gap_s) < 1.0:
-            command, reason = "BURN", "rival derate probability is high"
-        else:
-            command, reason = "PROACTIVE TRAP", "preserve reserve while probing response"
-        target = max(0.0, own_speed_kmh + (8.0 if command == "BURN" else 0.0))
-        # Reference convex-envelope proxy: never request a negative or absurd speed.
-        feasible = target <= 380.0 and own_soc >= 5.0
-        return TacticalDecision(command, target if feasible else own_speed_kmh,
-                                1.0 if command == "BURN" else 0.2,
-                                max(0.01, (100.0 - own_soc) / 100.0), feasible, reason)
+        observed_gap = gap_s if gap_s is not None else observation.gap_s
+        plan = self.level2.plan(result, own_speed_kmh, observed_gap, own_soc)
+        self.last_level2 = plan
+        target = plan.reference_speed_kmh[0] if plan.reference_speed_kmh else own_speed_kmh
+        feasible = plan.envelope.feasible and own_soc >= 5.0
+        reason = {
+            "BURN": "rival derate probability and continuation value support attack",
+            "HARVEST": "rival may be hoarding energy; protect reserve",
+            "PROACTIVE TRAP": "probe response while preserving continuation energy",
+        }[plan.command]
+        return TacticalDecision(
+            plan.command,
+            target if feasible else own_speed_kmh,
+            plan.lambda_kin[0] if plan.lambda_kin else 0.0,
+            plan.lambda_b,
+            feasible,
+            reason,
+        )
