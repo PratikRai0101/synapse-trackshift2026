@@ -169,10 +169,17 @@ Run the multi-seed comparison with identical initial conditions:
   --seeds 10 --steps 100 --output artifacts/paired-benchmark.json
 ```
 
-The matrix compares the full Level 1 path against `no_mpc` over all hidden
-rival modes and reports mean, sample standard deviation, 95% confidence
-intervals, energy use, gap and completion rate. Rows are paired by seed and
-rival mode; failures remain in the report rather than being dropped.
+The matrix compares the full stack against these one-factor ablations over
+all hidden rival modes:
+
+- `no_mpc`
+- `no_search`
+- `no_soh`
+- `no_spatial`
+
+It reports mean, sample standard deviation, 95% confidence intervals, energy
+use, gap and completion rate. Rows are paired by seed and rival mode; failures
+remain in the report rather than being dropped.
 
 ### Why scale calibration was required
 

@@ -246,7 +246,9 @@ class TacticalDecision:
 class MotorsportIntelligence:
     """End-to-end sector/lap facade consumed by replay and training scripts."""
     def __init__(self, hmm_artifact: str | None = None,
-                 lap_map_artifact: str | None = None) -> None:
+                 lap_map_artifact: str | None = None,
+                 use_search: bool = True, use_spatial: bool = True,
+                 use_soh: bool = True) -> None:
         self.features = FeatureExtractor()
         self.hmm_source = "default"
         if hmm_artifact:
@@ -262,7 +264,9 @@ class MotorsportIntelligence:
         # Imported lazily to keep the HMM module usable as a small standalone
         # inference component without introducing a module cycle.
         from .control_layers import BoundedScenarioPlanner
-        self.level2 = BoundedScenarioPlanner()
+        self.use_soh = use_soh
+        self.level2 = BoundedScenarioPlanner(use_search=use_search,
+                                             use_spatial=use_spatial)
         self.lap_map = None
         self.lap_planner = None
         self.last_lap_plan = None
@@ -286,10 +290,13 @@ class MotorsportIntelligence:
             return None
         if self._planned_lap == lap and self.last_lap_plan is not None:
             return self.last_lap_plan
-        self.last_soh_decision = self.lifecycle.decide(battery_soh, battery_temperature)
+        effective_soh = battery_soh if self.use_soh else 1.0
+        effective_wear = tyre_wear if self.use_soh else 0.0
+        self.last_soh_decision = self.lifecycle.decide(
+            effective_soh, battery_temperature)
         self.last_lap_plan = self.lap_planner.plan(
-            energy, tyre_wear, battery_soh=battery_soh,
-            wear_cost=self.last_soh_decision.wear_cost,
+            energy, effective_wear, battery_soh=effective_soh,
+            wear_cost=self.last_soh_decision.wear_cost if self.use_soh else 0.0,
         )
         self._planned_lap = lap
         return self.last_lap_plan

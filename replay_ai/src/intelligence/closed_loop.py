@@ -64,7 +64,8 @@ class ClosedLoopSimulator:
                  hmm_artifact: str | None = None,
                  lap_map_artifact: str | None = None,
                  seed: int = 0,
-                 use_mpc: bool = True) -> None:
+                 use_mpc: bool = True,
+                 controller_variant: str = "full") -> None:
         self.config = config or SimulationConfig()
         self.rival_mode = rival_mode  # simulation truth; never passed to model
         rng = random.Random(seed)
@@ -79,8 +80,14 @@ class ClosedLoopSimulator:
         self.lap_deployed = 0.0
         self.battery_soh = 1.0
         self.battery_temperature = 70.0
-        self.model = MotorsportIntelligence(hmm_artifact=hmm_artifact,
-                                             lap_map_artifact=lap_map_artifact)
+        self.controller_variant = controller_variant
+        self.model = MotorsportIntelligence(
+            hmm_artifact=hmm_artifact,
+            lap_map_artifact=lap_map_artifact,
+            use_search=controller_variant != "no_search",
+            use_spatial=controller_variant != "no_spatial",
+            use_soh=controller_variant != "no_soh",
+        )
         self.execution = FastExecutionController()
         self.use_mpc = use_mpc
         self.last_mpc_result = None
