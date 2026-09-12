@@ -599,8 +599,12 @@ class JudgeModePanel:
             left_bound, right_bound = 16.0, float(window_width - 16.0)
             available = right_bound - left_bound
         width = min(self.width, available - 6.0)
-        height = min(self.height, max(190.0, float(window_height) * 0.33))
+        # The panel content is laid out on a fixed 224 px grid. Never shrink
+        # below it: a shorter panel makes the alternatives collide with the
+        # footer, which is exactly the clutter this HUD must avoid.
+        height = min(self.height, max(224.0, float(window_height) * 0.33))
         bottom = max(130.0, min(self.bottom_y, float(window_height) * 0.20))
+        bottom = min(bottom, max(16.0, float(window_height) - height - 16.0))
         return PanelBounds(
             left=(left_bound + right_bound - width) / 2.0,
             bottom=bottom,
@@ -669,116 +673,124 @@ class JudgeModePanel:
         self._t("context", context, left + width - pad, top - 34, 9,
                  TEXT, bold=True, anchor_x="right")
 
+        content_top = top - 50
         command_x = left + pad + 4
-        command_top = top - 50
-        self._t("recommend", "RECOMMENDATION", command_x, command_top, 10,
+        col_left_w = width * 0.36
+
+        # --- left column: recommendation, then the alternatives it beat -------
+        self._t("recommend", "RECOMMENDATION", command_x, content_top, 10,
                  MUTED, bold=True)
-        self._t("command", snapshot.command_label, command_x, command_top - 25,
+        self._t("command", snapshot.command_label, command_x, content_top - 24,
                  20, snapshot.command_color, bold=True)
-        confidence_y = command_top - 49
+        confidence_y = content_top - 48
         self._t("confidence", f"{snapshot.confidence * 100:.0f}% confidence",
                  command_x, confidence_y, 11, TEXT, bold=True)
-        draw_meter(command_x, confidence_y - 16, 190, 8,
+        draw_meter(command_x, confidence_y - 15,
+                   max(110.0, min(190.0, col_left_w - 20)), 8,
                    snapshot.confidence, snapshot.command_color)
-        self._t(
-            "target",
-            (f"TARGET {snapshot.target_speed_kmh:.0f} km/h"
-             if snapshot.target_speed_kmh is not None else "TARGET pending"),
-            command_x, confidence_y - 31, 8, MUTED,
+        target = (
+            f"TARGET {snapshot.target_speed_kmh:.0f} km/h"
+            if snapshot.target_speed_kmh is not None else "TARGET pending"
         )
-        self._t("energy", f"OWN STORE (EST.) {snapshot.own_energy_eu:.0f} EU",
-                 command_x, confidence_y - 45, 8, MUTED)
-        lap_budget = (
-            f"LAP TARGET {snapshot.lap_energy_target:.1f} EU"
-            if snapshot.lap_energy_target is not None else "LAP TARGET pending"
+        self._t("detail", f"{target}  •  STORE {snapshot.own_energy_eu:.0f} EU",
+                 command_x, confidence_y - 30, 8, MUTED)
+        budget = (
+            f"LAP {snapshot.lap_energy_target:.1f} EU"
+            if snapshot.lap_energy_target is not None else "LAP pending"
         )
         if snapshot.reserve_after_lap is not None:
-            lap_budget += f"  •  RESERVE {snapshot.reserve_after_lap:.1f} EU"
-        self._t("lap_budget", lap_budget, command_x, confidence_y - 59,
-                 7, MUTED)
-        self._t("validity", "VALID UNTIL NEXT OBSERVATION", command_x,
-                 confidence_y - 73, 7, MUTED)
+            budget += f"  •  RESERVE {snapshot.reserve_after_lap:.1f} EU"
+        self._t("budget", budget, command_x, confidence_y - 43, 7, MUTED)
 
-        belief_x = left + min(300.0, width * 0.31)
-        belief_top = top - 50
-        self._t("belief_header", snapshot.rival_label, belief_x, belief_top, 10,
+        # --- middle column: rival ERS capability belief ----------------------
+        belief_x = left + width * 0.38
+        self._t("belief_header", snapshot.rival_label, belief_x, content_top, 10,
                  MUTED, bold=True)
+        meter_width = max(90.0, min(180.0, width * 0.18))
         for index, mode in enumerate(snapshot.rival_modes):
-            y = belief_top - 23 - index * 23
-            self._t(f"mode_label_{index}", mode.mode, belief_x, y, 10,
+            y = content_top - 23 - index * 22
+            self._t(f"mode_label_{index}", mode.mode, belief_x, y, 9,
                      mode.color, bold=True)
-            meter_left = belief_x + 70
-            meter_width = max(80.0, min(190.0, width * 0.20))
-            draw_meter(meter_left, y, meter_width, 10,
+            meter_left = belief_x + 62
+            draw_meter(meter_left, y, meter_width, 9,
                        mode.probability, mode.color)
             self._t(f"mode_value_{index}", f"{mode.probability * 100:.0f}%",
-                     meter_left + meter_width + 8, y, 10, TEXT, bold=True)
+                     meter_left + meter_width + 8, y, 9, TEXT, bold=True)
 
-        why_x = left + width - max(250.0, width * 0.27)
-        why_top = top - 50
-        self._t("why_header", "WHY THIS CHANGED", why_x, why_top, 10,
+        # --- right column: the causal evidence -------------------------------
+        why_x = left + width - max(240.0, width * 0.27)
+        self._t("why_header", "WHY THIS CHANGED", why_x, content_top, 10,
                  MUTED, bold=True)
         for index, evidence in enumerate(snapshot.evidence[:3]):
             self._t(f"evidence_{index}", f"• {evidence}", why_x,
-                     why_top - 23 - index * 18, 7, TEXT)
-        self._t("why_footer", snapshot.explanation[:48], why_x,
-                 why_top - 82, 7, snapshot.command_color)
+                     content_top - 23 - index * 16, 7, TEXT)
+        self._t("why_footer", snapshot.explanation[:44], why_x,
+                 content_top - 74, 7, snapshot.command_color)
         layers = "  →  ".join(
             ("HMM40", "POMCP" if snapshot.search_particles else "SEARCH",
              "SOCP", "MPC")
         )
         self._t("layers", f"LAYER ACTIVITY  {layers}", why_x,
-                 why_top - 102, 7, ELECTRIC, bold=True)
+                 content_top - 92, 7, ELECTRIC, bold=True)
 
-        options_top = top - 160
+        # --- alternatives, pinned above the footer so it can never collide ---
+        options_title_y = bottom + 64
+        option_rows = (bottom + 48, bottom + 34, bottom + 20)
+        cw = col_left_w
         if branch is not None and getattr(branch, "outcomes", ()):
-            self._t("alternatives", "COUNTERFACTUAL BRANCH • PUBLIC START",
-                     left + pad, options_top, 9, ELECTRIC, bold=True)
+            self._t("alternatives", "COUNTERFACTUAL BRANCH",
+                     command_x, options_title_y, 9, ELECTRIC, bold=True)
+            modes = max(
+                (outcome.plausible_modes for outcome in branch.outcomes[:3]),
+                default=0,
+            )
+            self._t("branch_modes", f"{modes} plausible responses",
+                     command_x + cw, options_title_y, 7, ELECTRIC,
+                     anchor_x="right")
             for index, outcome in enumerate(branch.outcomes[:3]):
-                y = options_top - 18 - index * 16
+                y = option_rows[index]
                 color = snapshot.command_color if outcome.action == snapshot.command else MUTED
-                self._t(f"branch_name_{index}", outcome.action, left + pad, y, 9,
+                self._t(f"branch_name_{index}", outcome.action, command_x, y, 8,
                          color, bold=outcome.action == snapshot.command)
                 self._t(
                     f"branch_gap_{index}",
-                    f"Δ gap {getattr(outcome, 'gap_change_s', 0.0):+.2f}s  "
+                    f"Δ {getattr(outcome, 'gap_change_s', 0.0):+.2f}s",
+                    command_x + cw * 0.30, y, 7, TEXT,
+                )
+                self._t(
+                    f"branch_final_{index}",
                     f"→ {outcome.final_gap_s:.2f}s",
-                    left + pad + 140, y, 8, TEXT,
+                    command_x + cw * 0.54, y, 7, TEXT,
                 )
                 self._t(f"branch_energy_{index}",
-                         f"store {outcome.final_energy:.1f} EU  deploy {outcome.energy_deployed:.1f} EU",
-                         left + pad + 280, y, 8, MUTED)
-                self._t(f"branch_modes_{index}",
-                         f"{outcome.plausible_modes} plausible responses",
-                         left + width - pad, y, 8, color, anchor_x="right")
+                         f"store {outcome.final_energy:.0f} EU",
+                         command_x + cw, y, 7, MUTED, anchor_x="right")
         else:
             search_title = (
                 f"BOUNDED POMCP ALTERNATIVES  •  {snapshot.search_particles} PARTICLES"
                 if snapshot.search_particles else "TACTICAL ALTERNATIVES"
             )
-            self._t("alternatives", search_title, left + pad,
-                     options_top, 9, MUTED, bold=True)
-            option_x = left + pad
+            self._t("alternatives", search_title, command_x,
+                     options_title_y, 9, MUTED, bold=True)
             for index, option in enumerate(snapshot.options[:3]):
-                y = options_top - 18 - index * 16
+                y = option_rows[index]
                 color = snapshot.command_color if option.selected else MUTED
                 marker = "SELECTED" if option.selected else "REJECTED"
-                self._t(f"option_name_{index}", option.command, option_x, y, 9,
+                self._t(f"option_name_{index}", option.command, command_x, y, 8,
                          color, bold=option.selected)
-                self._t(f"option_status_{index}", marker, option_x + 112, y, 8,
-                         color, bold=option.selected)
-                self._t(f"option_gain_{index}", f"gap +{option.gap_gain_s:.2f}s",
-                         option_x + 210, y, 8, TEXT)
+                self._t(f"option_status_{index}", marker,
+                         command_x + cw * 0.30, y, 7, color,
+                         bold=option.selected)
+                self._t(f"option_gain_{index}",
+                         f"gap {option.gap_gain_s:+.2f}s",
+                         command_x + cw * 0.45, y, 7, TEXT)
                 self._t(f"option_energy_{index}",
-                         f"energy {option.energy_delta_eu:+.1f} EU",
-                         option_x + 300, y, 8, MUTED)
-                self._t(f"option_value_{index}",
-                         f"continuation {option.continuation_value:+.2f}",
-                         option_x + 430, y, 8, MUTED)
+                         f"{option.energy_delta_eu:+.1f} EU",
+                         command_x + cw * 0.62, y, 7, MUTED)
                 self._t(f"option_score_{index}", f"score {option.score:+.2f}",
-                         left + width - pad, y, 8, color, anchor_x="right")
+                         command_x + cw, y, 7, color, anchor_x="right")
 
-        footer_y = bottom + 11
+        footer_y = bottom + 9
         envelope = f"ENVELOPE {snapshot.envelope_status}"
         if snapshot.envelope_residual is not None:
             envelope += f"  residual {snapshot.envelope_residual:.3g}"
@@ -839,7 +851,9 @@ class JudgeWalkthroughPanel:
 
     def layout_bounds(self, window_width: float, window_height: float) -> PanelBounds:
         width = min(self.width, max(320.0, float(window_width) - 40.0))
-        height = min(self.height, max(300.0, float(window_height) - 40.0))
+        # 480 px is the smallest height at which the six-line step body and the
+        # live-proof card both fit without spilling into each other.
+        height = min(self.height, max(480.0, float(window_height) - 40.0))
         return PanelBounds(
             left=(float(window_width) - width) / 2.0,
             bottom=(float(window_height) - height) / 2.0,
@@ -1043,6 +1057,11 @@ class JudgeWalkthroughPanel:
         self.action_rects.append(("close", *close_rect))
         self._t("walk_close", "H / ?  CLOSE", right - pad, top - 28, 8,
                  MUTED, bold=True, anchor_x="right")
+        # Header rule keeps the title, step rail and content visually separate.
+        arcade.draw_rect_filled(
+            arcade.XYWH(left + width / 2.0, top - 48, width - 2 * pad, 1),
+            EDGE_SOFT,
+        )
 
         steps = controller.steps
         step_count = len(steps)
@@ -1074,7 +1093,7 @@ class JudgeWalkthroughPanel:
         if step is None:
             return
         index = controller.step_index
-        content_top = top - 120
+        content_top = top - 112
         left_width = width * 0.43
         self._t("walk_kicker", f"STEP {index + 1} / {step_count}  •  {step.mode_label}",
                  left + pad, content_top, 9, step.mode_color, bold=True)
@@ -1082,18 +1101,26 @@ class JudgeWalkthroughPanel:
                  17, TEXT, bold=True)
         self._t("walk_summary", step.summary, left + pad, content_top - 62,
                  9, MUTED)
+
+        # The callout and the live-proof card share a fixed lower band so a long
+        # step body can never overlap either of them.
+        callout_bottom = bottom + 74
+        callout_top = callout_bottom + 86
+        body_top = content_top - 92
+        wrap_cols = max(30, int((left_width - pad - 24) / 5.2))
+        max_body_lines = max(2, int((body_top - callout_top - 10) // 17))
         body_line_index = 0
         for line in step.body:
-            for wrapped in textwrap.wrap(line, width=54) or (line,):
+            for wrapped in textwrap.wrap(line, width=wrap_cols) or (line,):
+                if body_line_index >= max_body_lines:
+                    break
                 self._t(f"walk_body_{body_line_index}", wrapped,
                          left + pad,
-                         content_top - 99 - body_line_index * 19,
+                         body_top - body_line_index * 17,
                          9,
                          TEXT)
                 body_line_index += 1
 
-        callout_bottom = bottom + 80
-        callout_top = bottom + 166
         draw_panel(
             left + pad + (left_width - pad) / 2.0,
             callout_bottom + (callout_top - callout_bottom) / 2.0,
@@ -1109,11 +1136,11 @@ class JudgeWalkthroughPanel:
         self._t("walk_action", step.action_hint, left + pad + 14,
                  callout_top - 49, 10, step.mode_color, bold=True)
         self._t("walk_action_note", "The live proof card updates from the same frame.",
-                 left + pad + 14, callout_bottom + 18, 7, MUTED)
+                 left + pad + 14, callout_bottom + 16, 7, MUTED)
 
         proof_left = left + left_width + 4.0
-        proof_bottom = bottom + 80
-        proof_top = top - 120
+        proof_bottom = callout_bottom
+        proof_top = content_top
         self._draw_live_proof(
             proof_left,
             proof_bottom,
@@ -1124,7 +1151,12 @@ class JudgeWalkthroughPanel:
             branch,
         )
 
-        footer_y = bottom + 28
+        # A rule separates the content from the fixed footer controls.
+        arcade.draw_rect_filled(
+            arcade.XYWH(left + width / 2.0, bottom + 64, width - 2 * pad, 1),
+            EDGE_SOFT,
+        )
+        footer_y = bottom + 22
         self._button("previous", "←  PREVIOUS", left + pad, footer_y, 116.0)
         self._button("next", "NEXT  →", right - pad - 116.0, footer_y, 116.0,
                      color=(0, 95, 115))

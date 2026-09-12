@@ -609,6 +609,12 @@ class QualifyingReplay(arcade.Window):
 
                     self.inner_pts = [world_to_map(x, y) for x, y in inner_world if x is not None and y is not None]
                     self.outer_pts = [world_to_map(x, y) for x, y in outer_world if x is not None and y is not None]
+                    # Seal the lap: the trace starts at the line and stops just
+                    # short of it, which otherwise leaves a gap on the straight.
+                    if len(self.inner_pts) > 2 and self.inner_pts[0] != self.inner_pts[-1]:
+                        self.inner_pts.append(self.inner_pts[0])
+                    if len(self.outer_pts) > 2 and self.outer_pts[0] != self.outer_pts[-1]:
+                        self.outer_pts.append(self.outer_pts[0])
                     try:
                         if len(self.inner_pts) > 1:
                             arcade.draw_line_strip(self.inner_pts, arcade.color.GRAY, 2)

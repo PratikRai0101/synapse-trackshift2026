@@ -1765,9 +1765,23 @@ class F1RaceReplayWindow(arcade.Window):
         self.tx = screen_cx - self.world_scale * world_cx
         self.ty = screen_cy - self.world_scale * world_cy
 
-        # Update the polyline screen coordinates based on new scale
-        self.screen_inner_points = [self.world_to_screen(x, y) for x, y in self.world_inner_points]
-        self.screen_outer_points = [self.world_to_screen(x, y) for x, y in self.world_outer_points]
+        # Update the polyline screen coordinates based on new scale.
+        # Close both edges back onto the first sample: a lap trace starts at the
+        # start/finish line and the final sample stops just short of it, which
+        # otherwise leaves a visible hole in the circuit on the main straight.
+        self.screen_inner_points = self._closed_loop(
+            [self.world_to_screen(x, y) for x, y in self.world_inner_points]
+        )
+        self.screen_outer_points = self._closed_loop(
+            [self.world_to_screen(x, y) for x, y in self.world_outer_points]
+        )
+
+    @staticmethod
+    def _closed_loop(points):
+        """Return ``points`` with the first vertex appended to seal the outline."""
+        if len(points) > 2 and points[0] != points[-1]:
+            return list(points) + [points[0]]
+        return list(points)
 
     def on_resize(self, width, height):
         """Called automatically by Arcade when window is resized."""
