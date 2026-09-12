@@ -24,6 +24,7 @@ class PublicTelemetryFrame:
     gap_s: Optional[float]
     active_aero: float
     tyre_life: float = 0.0
+    gap_estimated: bool = False
     source: str = "replay"
 
     def __post_init__(self) -> None:
@@ -39,8 +40,12 @@ class PublicTelemetryFrame:
 class PublicTelemetryAdapter:
     """Convert a replay frame into one causal ego/rival observation."""
 
-    def __init__(self, source: str = "fastf1-replay") -> None:
+    def __init__(self, source: str = "fastf1-replay",
+                 track_length_m: Optional[float] = None,
+                 sector_count: int = 3) -> None:
         self.source = source
+        self.track_length_m = track_length_m
+        self.sector_count = max(1, int(sector_count))
 
     @staticmethod
     def _number(value: Any, default: float = 0.0) -> float:
@@ -63,8 +68,22 @@ class PublicTelemetryAdapter:
         opponent = drivers.get(rival, {}) if rival else {}
         opponent = opponent or {}
         gap = frame.get("gap_s")
+        estimated_gap = False
         if gap is None:
             gap = opponent.get("gap_s", frame.get("gap"))
+        if gap is None and rival and self.track_length_m:
+            # RelativeDistance is public and causal. Convert the rival's
+            # distance ahead into seconds using the ego's current speed.
+            ego_rel = self._number(ego.get("rel_dist"), 0.0)
+            rival_rel = self._number(opponent.get("rel_dist"), 0.0)
+            lap_delta = int(opponent.get("lap", 0) or 0) - int(ego.get("lap", 0) or 0)
+            distance_fraction = lap_delta + rival_rel - ego_rel
+            if distance_fraction < 0.0:
+                distance_fraction += 1.0
+            speed_ms = self._number(ego.get("speed")) / 3.6
+            if speed_ms > 1.0:
+                gap = distance_fraction * self.track_length_m / speed_ms
+                estimated_gap = True
         drs = opponent.get("drs", 0)
         aero = opponent.get("active_aero")
         if aero is None:
@@ -75,13 +94,15 @@ class PublicTelemetryAdapter:
             driver=driver,
             rival=rival,
             lap=int(opponent.get("lap", ego.get("lap", 0)) or 0),
-            sector=int(opponent.get("sector", 0) or 0),
+            sector=int(opponent.get("sector", min(self.sector_count - 1,
+                self._number(opponent.get("rel_dist"), 0.0) * self.sector_count)) or 0),
             speed_kmh=self._number(opponent.get("speed")),
             throttle_pct=self._number(opponent.get("throttle")),
             brake=self._number(opponent.get("brake")),
             gap_s=None if gap is None else self._number(gap),
             active_aero=max(0.0, min(1.0, self._number(aero))),
             tyre_life=self._number(opponent.get("tyre_life")),
+            gap_estimated=estimated_gap,
             source=self.source,
         )
 
