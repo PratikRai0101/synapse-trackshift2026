@@ -22,6 +22,9 @@ small season SOH dynamic-programming reference and a tactical command facade
 (`BURN`, `HARVEST`, `PROACTIVE TRAP`) suitable for fitting emissions and
 replacing the reference envelope/search with validated models later.
 
+See [docs/AIBackend.md](./docs/AIBackend.md) for the environment setup, the
+calibration pipeline and the currently measured accuracy.
+
 - **Race Replay Visualization:** Watch the race unfold with real-time driver positions on a rendered track.
 - **Safety Car Visualization:** See the Safety Car deploy from pit lane, lead the field, and return to pits — with animated transitions and pulsing glow effects.
 - **Insights Menu:** Floating menu for quick access to telemetry analysis tools (launches automatically with replay).

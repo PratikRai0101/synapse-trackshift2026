@@ -115,23 +115,29 @@ class FortyStateHMM:
     """Forward HMM over ERS x override x tyre (4 x 2 x 5 = 40 states)."""
 
     def __init__(self, self_transition: float = 0.92, sigma: float = 1.0,
-                 emission_means: Mapping[str, Mapping[str, float]] | None = None) -> None:
+                 emission_means: Mapping[str, Mapping[str, float]] | None = None,
+                 emission_sigma: Mapping[str, float] | None = None) -> None:
         self.sigma = max(1e-6, float(sigma))
         self.self_transition = max(0.0, min(1.0, float(self_transition)))
         self._belief: Dict[HMMState, float] = {s: 1.0 / len(STATES) for s in STATES}
         self._extractor = FeatureExtractor()
         self.emission_means = dict(emission_means or {})
+        # Per-feature scale. A single scalar sigma leaves the likelihood almost
+        # flat across modes because feature errors are small (~0.01-0.3), so
+        # calibrated scales are required for the filter to discriminate at all.
+        self.emission_sigma = dict(emission_sigma or {})
 
     @classmethod
     def from_artifact(cls, path: str, **kwargs) -> "FortyStateHMM":
-        """Load fitted means produced by ``fit_hmm_emissions.py``."""
+        """Load fitted means and scales produced by ``fit_hmm_emissions.py``."""
         with open(path) as source:
             artifact = json.load(source)
         means = artifact.get("means", artifact)
-        # ``samples`` is metadata, never an emission parameter.
-        clean = {mode: {key: value for key, value in values.items()
-                        if key in {"dgap", "throttle_clip", "brake_delta"}}
+        keep = {"dgap", "throttle_clip", "brake_delta"}
+        # ``samples``/``variance`` are calibration metadata, not emissions.
+        clean = {mode: {key: value for key, value in values.items() if key in keep}
                  for mode, values in means.items()}
+        kwargs.setdefault("emission_sigma", artifact.get("sigma") or None)
         return cls(emission_means=clean, **kwargs)
 
     def observe(self, observation: RivalTelemetry) -> HMMResult:
@@ -164,12 +170,18 @@ class FortyStateHMM:
         predicted = {s: sum(self._belief[p] * (self.self_transition if p == s else switch)
                             for p in STATES) for s in STATES}
         likelihood: Dict[HMMState, float] = {}
+        # Diagonal Gaussian per feature. Scale falls back to the scalar sigma
+        # for any feature the artifact did not supply.
+        scales = tuple(
+            max(1e-6, float(self.emission_sigma.get(name, self.sigma)))
+            for name in ("dgap", "throttle_clip", "brake_delta")
+        )
         for state in STATES:
             closure, clip, brake = self._expected(state, features)
-            error = ((features.dgap - closure) ** 2 +
-                     (features.throttle_clip - clip) ** 2 +
-                     (features.brake_delta - brake) ** 2)
-            likelihood[state] = math.exp(-error / (2.0 * self.sigma ** 2))
+            error = (((features.dgap - closure) / scales[0]) ** 2 +
+                     ((features.throttle_clip - clip) / scales[1]) ** 2 +
+                     ((features.brake_delta - brake) / scales[2]) ** 2)
+            likelihood[state] = math.exp(-0.5 * error)
         weighted = {s: predicted[s] * likelihood[s] for s in STATES}
         total = sum(weighted.values()) or 1.0
         self._belief = {s: weighted[s] / total for s in STATES}
