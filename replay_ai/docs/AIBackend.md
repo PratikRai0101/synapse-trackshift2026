@@ -197,6 +197,17 @@ truth, physical-versus-lifecycle resistance mismatch, and explicit limitations.
 The rival-mode alignment is diagnostic only; it is not a public-telemetry
 validation result.
 
+For circuit-level generalization, provide JSONL rows containing a `circuit`
+field and run:
+
+```sh
+.venv/bin/python scripts/evaluate_circuit_holdout.py data/laps \
+  --output artifacts/circuit-holdout.json
+```
+
+This performs leave-one-circuit-out evaluation and refuses to mix held-out
+circuit rows into training.
+
 ### Why scale calibration was required
 
 The first version fitted emission *means* but kept a hard-coded `sigma=1.0`. With
