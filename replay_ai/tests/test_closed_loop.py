@@ -29,6 +29,17 @@ def test_closed_loop_applies_zone_mpc_output():
     assert 0.0 <= sim.last_mpc_result.power_fraction <= 1.0
 
 
+def test_closed_loop_tracks_reactive_defence_and_pit_stop():
+    sim = ClosedLoopSimulator(HiddenRivalMode.MATCH)
+    sim.ego.gap_s = 0.5
+    sim.run(1)
+    assert sim.rival_defending
+    before = sim.plant.state.pit_stops
+    sim.pit_stop()
+    assert sim.plant.state.pit_stops == before + 1
+    assert sim.plant.state.tyre_wear == 0.0
+
+
 def test_hidden_rival_policy_is_not_exposed_to_model():
     sim = ClosedLoopSimulator(HiddenRivalMode.CONSERVE)
     sim.step()

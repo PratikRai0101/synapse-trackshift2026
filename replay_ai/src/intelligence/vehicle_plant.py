@@ -18,6 +18,11 @@ class PlantConfig:
     thermal_gain: float = 0.08
     cooling_rate: float = 0.03
     wear_rate: float = 0.0004
+    initial_fuel_kg: float = 100.0
+    fuel_burn_kg_per_s: float = 0.02
+    slipstream_drag_reduction: float = 0.18
+    pit_stop_duration_s: float = 22.0
+    pit_fuel_kg: float = 80.0
 
 
 @dataclass
@@ -28,6 +33,9 @@ class PlantState:
     tyre_temperature: float = 85.0
     tyre_wear: float = 0.0
     distance_m: float = 0.0
+    fuel_mass_kg: float = 100.0
+    pit_time_s: float = 0.0
+    pit_stops: int = 0
 
 
 @dataclass(frozen=True)
@@ -51,8 +59,19 @@ class VehiclePlant:
         self.state = state or PlantState()
         self.config = config or PlantConfig()
 
+    def pit_stop(self, new_tyre_temperature: float = 85.0) -> None:
+        """Apply a pit-stop event: replace tyres and restore fuel mass."""
+        state = self.state
+        cfg = self.config
+        state.tyre_wear = 0.0
+        state.tyre_temperature = new_tyre_temperature
+        state.fuel_mass_kg = cfg.pit_fuel_kg
+        state.pit_time_s += cfg.pit_stop_duration_s
+        state.pit_stops += 1
+
     def step(self, power_fraction: float, dt_s: float, curvature: float = 0.0,
-             brake_fraction: float = 0.0, regen_fraction: float = 0.0) -> PlantStep:
+             brake_fraction: float = 0.0, regen_fraction: float = 0.0,
+             slipstream_gap_s: float | None = None) -> PlantStep:
         cfg = self.config
         state = self.state
         dt = max(0.0, float(dt_s))
@@ -60,13 +79,17 @@ class VehiclePlant:
         brake = max(0.0, min(1.0, float(brake_fraction)))
         regen = max(0.0, min(1.0, float(regen_fraction)))
         speed_ms = max(0.0, state.speed_kmh / 3.6)
+        mass_factor = cfg.mass_kg / max(cfg.mass_kg + state.fuel_mass_kg, 1.0)
+        drag = cfg.drag_accel
+        if slipstream_gap_s is not None and slipstream_gap_s <= 1.0:
+            drag *= max(0.0, 1.0 - cfg.slipstream_drag_reduction)
         grip = cfg.tyre_mu * cfg.gravity * max(0.35, 1.0 - 0.35 * state.tyre_wear)
         if abs(float(curvature)) > 1e-9:
             speed_ms = min(speed_ms, math.sqrt(grip / abs(float(curvature))))
         lateral = speed_ms * speed_ms * abs(float(curvature))
         available_sq = max(0.0, grip * grip - lateral * lateral)
         available_longitudinal = math.sqrt(available_sq)
-        requested = cfg.max_power_accel * power - cfg.drag_accel
+        requested = cfg.max_power_accel * mass_factor * power - drag
         requested -= cfg.brake_accel * brake
         longitudinal = max(-cfg.brake_accel,
                            min(available_longitudinal, requested))
@@ -74,6 +97,8 @@ class VehiclePlant:
         speed_ms = max(0.0, speed_ms + longitudinal * dt)
         state.speed_kmh = speed_ms * 3.6
         state.distance_m += speed_ms * dt
+        state.fuel_mass_kg = max(0.0, state.fuel_mass_kg -
+                                  cfg.fuel_burn_kg_per_s * max(power, 0.2) * dt)
         net_energy = (-cfg.energy_rate * power + cfg.regen_rate * regen) * dt
         state.energy = max(0.0, min(100.0, state.energy + net_energy))
         state.battery_temperature += (cfg.thermal_gain * abs(net_energy) -
