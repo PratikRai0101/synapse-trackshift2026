@@ -20,6 +20,7 @@ from .energy import (
 from .config import ModelConfig, DEFAULT_CONFIG, load_config
 from .overtake import OvertakeAssessment, evaluate_overtake_window
 from .race_engineer import DecisionReport, RaceEngineer
+from .telemetry_adapter import PublicTelemetryFrame, PublicTelemetryAdapter
 from .hierarchical import (
     ERSMode, OverrideMode, TyreState, HMMState, STATES,
     RivalTelemetry, RivalFeatures, FeatureExtractor, HMMResult, FortyStateHMM,
@@ -54,4 +55,6 @@ __all__ = [
     "SOHDecision",
     "MotorsportIntelligence",
     "TacticalDecision",
+    "PublicTelemetryFrame",
+    "PublicTelemetryAdapter",
 ]
