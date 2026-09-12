@@ -61,7 +61,7 @@ class Decision:
 class Controller(Protocol):
     def decide(self, decision_input: DecisionInput, budget_s: float) -> Decision: ...
 
-    def notify_observation(self, rival_speed_mps: float) -> None: ...
+    def notify_observation(self, rival_speed_mps: float, corner_limit_mps: float | None = None) -> None: ...
 
     def notify_commitment_outcome(self, attacked: bool, gained: bool) -> None: ...
 
@@ -96,7 +96,7 @@ class ReferenceController:
             reason_codes=["BASELINE"],
         )
 
-    def notify_observation(self, rival_speed_mps: float) -> None:
+    def notify_observation(self, rival_speed_mps: float, corner_limit_mps: float | None = None) -> None:
         return None
 
     def notify_commitment_outcome(self, attacked: bool, gained: bool) -> None:
@@ -164,7 +164,7 @@ class StationaryPlanner:
         )
         return _decision_from_search(result, decision_input, time.perf_counter() - start)
 
-    def notify_observation(self, rival_speed_mps: float) -> None:
+    def notify_observation(self, rival_speed_mps: float, corner_limit_mps: float | None = None) -> None:
         return None
 
     def notify_commitment_outcome(self, attacked: bool, gained: bool) -> None:
@@ -209,7 +209,7 @@ class PosteriorMeanPlanner:
             lateral_target_m=_target_lateral(best),
         )
 
-    def notify_observation(self, rival_speed_mps: float) -> None:
+    def notify_observation(self, rival_speed_mps: float, corner_limit_mps: float | None = None) -> None:
         return None
 
     def notify_commitment_outcome(self, attacked: bool, gained: bool) -> None:
@@ -264,7 +264,7 @@ class ConvexPlannerController:
             runtime_s=time.perf_counter() - start,
         )
 
-    def notify_observation(self, rival_speed_mps: float) -> None:
+    def notify_observation(self, rival_speed_mps: float, corner_limit_mps: float | None = None) -> None:
         return None
 
     def notify_commitment_outcome(self, attacked: bool, gained: bool) -> None:
@@ -289,6 +289,7 @@ class AmbiguityAwareController:
         closure_fn=None,
         response_fn=None,
         rival_config=None,
+        response_target_ceiling_mps: float = 90.0,
         seed: int = 0,
     ) -> None:
         self.terminal_value = terminal_value
@@ -304,6 +305,7 @@ class AmbiguityAwareController:
         self.closure_fn = closure_fn
         self.response_fn = response_fn
         self.rival_config = rival_config or RivalPolicyConfig()
+        self.response_target_ceiling_mps = response_target_ceiling_mps
         self.rng = random.Random(seed)
         self.reserve_guard = ReserveGuard(terminal_value.reserve)
         self.no_progress = NoProgressGuard(repeat_threshold=4, cooldown_s=3.0)
@@ -482,8 +484,21 @@ class AmbiguityAwareController:
         )
 
     # -- causal feedback ---------------------------------------------------
-    def notify_observation(self, rival_speed_mps: float) -> None:
-        """Update the belief from the rival's public speed response."""
+    def notify_observation(
+        self, rival_speed_mps: float, corner_limit_mps: float | None = None
+    ) -> None:
+        """Update the belief from the rival's public speed response.
+
+        The observation is only informative where the circuit does not mask the
+        policy: in a corner both a defending and a conserving rival are capped
+        at the same speed, so the sample is skipped rather than misread.
+        """
+        if (
+            corner_limit_mps is not None
+            and corner_limit_mps < self.response_target_ceiling_mps
+        ):
+            self.belief.mix_for_non_stationarity()
+            return
         policies = {p.policy for p in self.belief.particles}
         if self.response_fn is not None:
             expected = {p: self.response_fn(self.last_family, p) for p in policies}

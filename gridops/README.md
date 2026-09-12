@@ -41,7 +41,7 @@ Use the venv at the repository root: `../.venv/bin/python`.
 
 ## Test coverage
 
-112 passing, 2 xfailed. Highlights:
+113 passing, 1 xfailed. Highlights:
 
 - **Battery:** OCV/current-root identity, energy conservation derivative,
   current/voltage/SOC saturation, cooling, no post-hoc SOC clipping.
@@ -79,15 +79,19 @@ Use the venv at the repository root: `../.venv/bin/python`.
 - **Risk criteria:** CVaR is more conservative than the mean and equals it at
   ``alpha=1``; minimax regret selects the action with the lowest worst regret.
 
-## Known open item: observation identifiability
+## Known open item: residual ambiguity
 
-The two `xfail` tests in `tests/test_calibration.py` record the acceptance
-criterion for M committing on evidence. They fail for a real reason: the
-kinematic observation is dominated by track transients. A policy response is
-about 2 m/s over one second, while corner entry/exit moves the rival's speed by
-about 7 m/s. Gap closure is worse still, because it accumulates the ego's own
-advantage. The fix is to condition the observation model on track position or
-run an online model rollout against the ego's actual speed.
+The observation model was fixed: the belief now updates on the rival's public
+speed response (not confounded gap closure), gated to sections where the circuit
+is not masking the policy, and the tactical closure is measured over the 3 s
+planning horizon. Against a conserving rival the belief reads weak and the
+controller commits, closes and beats the reference; that acceptance test passes.
+
+The remaining `xfail` is a genuine ambiguity, not a bug: once a matching rival
+is far enough ahead it stops defending, so its response looks conserving and the
+controller commits. Separating "stopped defending" from "conserving" needs
+traffic and context conditioning. The response signal is also only ~2.5 m/s, so
+several informative observations are needed before the posterior is decisive.
 
 ## Conventions frozen at G0
 

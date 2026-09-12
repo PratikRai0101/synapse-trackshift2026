@@ -31,7 +31,7 @@ class AlwaysAttackController:
             reason_codes=["TEST_ALWAYS_ATTACK"],
         )
 
-    def notify_observation(self, rival_speed_mps: float) -> None:
+    def notify_observation(self, rival_speed_mps: float, corner_limit_mps: float | None = None) -> None:
         return None
 
     def notify_commitment_outcome(self, attacked: bool, gained: bool) -> None:
