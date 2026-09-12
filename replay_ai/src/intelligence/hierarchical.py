@@ -240,6 +240,7 @@ class TacticalDecision:
     lambda_b: float
     envelope_feasible: bool
     reason: str
+    lap_energy_target: float | None = None
 
 
 class MotorsportIntelligence:
@@ -303,6 +304,10 @@ class MotorsportIntelligence:
             "HARVEST": "rival may be hoarding energy; protect reserve",
             "PROACTIVE TRAP": "probe response while preserving continuation energy",
         }[plan.command]
+        lap_energy_target = (
+            self.last_lap_plan[0].deploy_energy
+            if self.last_lap_plan else None
+        )
         return TacticalDecision(
             plan.command,
             target if feasible else own_speed_kmh,
@@ -310,4 +315,5 @@ class MotorsportIntelligence:
             plan.lambda_b,
             feasible,
             reason,
+            lap_energy_target,
         )
