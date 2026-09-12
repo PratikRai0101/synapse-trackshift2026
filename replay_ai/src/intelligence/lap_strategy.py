@@ -67,6 +67,18 @@ class LapTimeMap:
             "global": self._global,
         }
 
+    def save(self, path: str) -> str:
+        import json
+        with open(path, "w") as destination:
+            json.dump(self.to_dict(), destination, indent=2)
+        return path
+
+    @classmethod
+    def from_file(cls, path: str) -> "LapTimeMap":
+        import json
+        with open(path) as source:
+            return cls.from_dict(json.load(source))
+
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "LapTimeMap":
         result = cls(bin_width=float(data.get("bin_width", 5.0)))
