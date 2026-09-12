@@ -53,6 +53,17 @@ def test_observation_updates_only_from_current_public_sample():
     assert model.last_hmm is not None
 
 
+def test_runtime_metrics_report_replanned_layers():
+    model = MotorsportIntelligence()
+    model.observe(RivalTelemetry(300, 100, 0, 1.0, lap=1), own_soc=60)
+    metrics = model.runtime_metrics()
+
+    assert "HMM" in metrics["replanned_layers"]
+    assert "L2" in metrics["replanned_layers"]
+    # No lap map artifact is loaded here, so Level 3 never replans.
+    assert "L3" not in metrics["replanned_layers"]
+
+
 def test_lifecycle_dp_can_choose_replacement_for_degraded_pack():
     decision = SeasonLifecycleManager(races=10).decide(soh=0.1, temperature=95)
     assert decision.replace

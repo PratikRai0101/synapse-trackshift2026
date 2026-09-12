@@ -88,7 +88,7 @@ def test_counterfactual_launch_uses_branch_without_touching_frames(monkeypatch):
     sentinel = object()
     monkeypatch.setattr(
         "src.interfaces.race_replay.run_counterfactual",
-        lambda start, steps, seed: sentinel,
+        lambda start, steps, seed, **kwargs: sentinel,
     )
 
     original_frames = list(window.frames)

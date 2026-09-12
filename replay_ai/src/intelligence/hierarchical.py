@@ -403,6 +403,9 @@ class MotorsportIntelligence:
         self.last_level2 = None
         self._runtime_battery_soh = 1.0
         self._runtime_battery_temperature = 70.0
+        # Short keys for the layers that recomputed in the latest observation.
+        # L3 only replans when the lap boundary moves; the rest run every tick.
+        self.last_replanned: tuple[str, ...] = ()
 
     def runtime_metrics(self) -> dict:
         """Serializable diagnostics consumed by the runtime HUD/API."""
@@ -431,6 +434,7 @@ class MotorsportIntelligence:
             "tactical_action_scores": [
                 action.__dict__ for action in self.last_level2.action_scores
             ] if self.last_level2 else [],
+            "replanned_layers": tuple(self.last_replanned),
             "scenario_particles": (self.last_level2.search_particles
                                     if self.last_level2 else 0),
             "scenario_histories": (self.last_level2.search_histories
@@ -467,7 +471,9 @@ class MotorsportIntelligence:
                 battery_temperature: float = 70.0) -> TacticalDecision:
         self._runtime_battery_soh = float(battery_soh)
         self._runtime_battery_temperature = float(battery_temperature)
+        lap_replanned = False
         if self.lap_planner is not None:
+            lap_replanned = self._planned_lap != observation.lap
             self.plan_lap(observation.lap, own_soc, observation.tyre_life,
                           battery_soh, battery_temperature)
         result = self.hmm.update(self.features.update(observation))
@@ -488,6 +494,15 @@ class MotorsportIntelligence:
         lap_energy_target = (
             self.last_lap_plan[0].deploy_energy
             if self.last_lap_plan else None
+        )
+        self.last_replanned = tuple(
+            key for key, active in (
+                ("L3", lap_replanned),
+                ("HMM", True),
+                ("L2", True),
+                ("SOCP", True),
+                ("MPC", True),
+            ) if active
         )
         return TacticalDecision(
             plan.command,
