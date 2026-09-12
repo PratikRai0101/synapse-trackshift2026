@@ -9,6 +9,7 @@ window so it can be tested without an OpenGL context.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import textwrap
 from typing import Any, Mapping, Optional, Sequence
 
 import arcade
@@ -17,7 +18,9 @@ from src.ui_theme import (
     AMBER,
     DANGER,
     EDGE,
+    EDGE_SOFT,
     ELECTRIC,
+    F1_RED,
     GREEN,
     MUTED,
     PANEL,
@@ -367,6 +370,183 @@ class JudgeModeController:
 
 
 @dataclass(frozen=True)
+class JudgeWalkthroughStep:
+    """One teachable moment in the deterministic judge demonstration."""
+
+    title: str
+    summary: str
+    body: tuple[str, ...]
+    action_hint: str
+    mode_label: str
+    mode_color: RGB
+    bookmark_index: Optional[int] = None
+
+
+def scenario_label_from_session(session_info: Optional[Mapping[str, Any]]) -> str:
+    """Return a truthful, short name for the replay used by the walkthrough."""
+    if not session_info:
+        return "DETERMINISTIC REPLAY PATH"
+    values = " ".join(
+        str(session_info.get(key, ""))
+        for key in ("event_name", "circuit_name", "country")
+    ).lower()
+    if "monza" in values or "italian" in values:
+        return "MONZA • ITALIAN GP"
+    circuit = str(session_info.get("circuit_name", "")).strip()
+    if circuit:
+        return f"{circuit.upper()} • DETERMINISTIC PATH"
+    return "DETERMINISTIC REPLAY PATH"
+
+
+def build_walkthrough_steps(
+    bookmarks: Sequence[JudgeBookmark] = (),
+    scenario_label: str = "MONZA • ITALIAN GP",
+) -> tuple[JudgeWalkthroughStep, ...]:
+    """Build the fixed six-step explanation used by ``H``/``?``.
+
+    The walkthrough is deliberately content-first. It never invents a hidden
+    battery value; the live proof area is populated from the same snapshot and
+    branch objects as Judge Mode itself.
+    """
+    hotkeys = tuple(bookmark.hotkey for bookmark in bookmarks)
+
+    def jump(index: int) -> str:
+        if index < len(hotkeys):
+            return f"Press {hotkeys[index]} to load this fixed moment."
+        return "Use the recorded replay controls to choose a moment."
+
+    return (
+        JudgeWalkthroughStep(
+            title="START WITH REAL TELEMETRY",
+            summary="History is the source of truth; the AI adds a decision layer.",
+            body=(
+                f"This {scenario_label} path starts from an observed replay frame.",
+                "A bookmark pauses the recorded cars and keeps the frame reproducible.",
+                "No counterfactual result can rewrite what actually happened.",
+            ),
+            action_hint=jump(0),
+            mode_label="REAL TELEMETRY REPLAY",
+            mode_color=ELECTRIC,
+            bookmark_index=0,
+        ),
+        JudgeWalkthroughStep(
+            title="READ THE CAPABILITY BELIEF",
+            summary="Public signals become four explicit hidden-state probabilities.",
+            body=(
+                "The bars describe rival ERS capability, not rival battery SOC.",
+                "Lharvest means deliberately saving; Lderate means physical depletion.",
+                "That distinction is the counter-harvest insight in one glance.",
+            ),
+            action_hint=jump(1),
+            mode_label="REAL TELEMETRY REPLAY",
+            mode_color=ELECTRIC,
+            bookmark_index=1,
+        ),
+        JudgeWalkthroughStep(
+            title="FOLLOW THE CAUSAL EVIDENCE",
+            summary="The Why panel makes the belief update auditable.",
+            body=(
+                "Speed, throttle, brake, gap response and aero proxy are public inputs.",
+                "The model explains which signals changed the tactical belief.",
+                "The recommendation is allowed to be uncertain when evidence is weak.",
+            ),
+            action_hint=jump(2),
+            mode_label="REAL TELEMETRY REPLAY",
+            mode_color=ELECTRIC,
+            bookmark_index=2,
+        ),
+        JudgeWalkthroughStep(
+            title="COMPARE THE REJECTED OPTIONS",
+            summary="The winner is meaningful only beside the alternatives it beat.",
+            body=(
+                "POMCP compares BURN, HARVEST and PROACTIVE TRAP in decision units.",
+                "Immediate gap, estimated energy and continuation value stay visible.",
+                "Selected and rejected actions are shown from the same observed frame.",
+            ),
+            action_hint=jump(3),
+            mode_label="REAL TELEMETRY REPLAY",
+            mode_color=ELECTRIC,
+            bookmark_index=3,
+        ),
+        JudgeWalkthroughStep(
+            title="FORK THE DECISION",
+            summary="Now ask what each action would do from this exact public state.",
+            body=(
+                "Pause on a bookmark, then press C to launch isolated branches.",
+                "Each branch starts with recorded speed, gap and estimated own store.",
+                "Results average three plausible hidden rival responses.",
+            ),
+            action_hint="Press C to run the counterfactual simulation.",
+            mode_label="COUNTERFACTUAL SIMULATION",
+            mode_color=AMBER,
+            bookmark_index=4,
+        ),
+        JudgeWalkthroughStep(
+            title="RETURN TO OBSERVED HISTORY",
+            summary="Simulation is a fork, never a replacement for the replay.",
+            body=(
+                "The branch reports final gap, remaining store and energy used.",
+                "Press SPACE to resume the recorded telemetry or choose another bookmark.",
+                "The mode badge tells the judge which world is on screen right now.",
+            ),
+            action_hint=jump(5),
+            mode_label="REAL TELEMETRY REPLAY",
+            mode_color=ELECTRIC,
+            bookmark_index=5,
+        ),
+    )
+
+
+class JudgeWalkthroughController:
+    """Pure interaction state for the in-app ``How It Works`` walkthrough."""
+
+    def __init__(self, steps: Sequence[JudgeWalkthroughStep] = ()) -> None:
+        self.steps = tuple(steps)
+        self.visible = False
+        self.step_index = 0
+        self.first_run_hint_visible = bool(self.steps)
+
+    @property
+    def current_step(self) -> Optional[JudgeWalkthroughStep]:
+        if not self.steps:
+            return None
+        return self.steps[self.step_index]
+
+    def open(self) -> bool:
+        self.visible = True
+        self.first_run_hint_visible = False
+        return self.visible
+
+    def close(self) -> bool:
+        self.visible = False
+        return self.visible
+
+    def toggle(self) -> bool:
+        return self.close() if self.visible else self.open()
+
+    def dismiss_hint(self) -> None:
+        self.first_run_hint_visible = False
+
+    def select(self, index: int) -> Optional[JudgeWalkthroughStep]:
+        if not self.steps:
+            return None
+        self.step_index = max(0, min(len(self.steps) - 1, int(index)))
+        return self.current_step
+
+    def step(self, direction: int) -> Optional[JudgeWalkthroughStep]:
+        if not self.steps:
+            return None
+        delta = 1 if direction >= 0 else -1
+        return self.select(self.step_index + delta)
+
+    def select_for_bookmark(self, bookmark_index: int) -> Optional[JudgeWalkthroughStep]:
+        for index, step in enumerate(self.steps):
+            if step.bookmark_index == int(bookmark_index):
+                return self.select(index)
+        return None
+
+
+@dataclass(frozen=True)
 class PanelBounds:
     left: float
     bottom: float
@@ -460,6 +640,20 @@ class JudgeModePanel:
                  MUTED, bold=True)
         draw_chip(left + pad + 205, top - 17, "JUDGE MODE", ELECTRIC,
                   size=8, height=16, pad_x=6)
+        run_mode = (
+            "COUNTERFACTUAL SIMULATION"
+            if branch is not None and getattr(branch, "outcomes", ())
+            else "REAL TELEMETRY REPLAY"
+        )
+        draw_chip(
+            left + pad + 292,
+            top - 17,
+            run_mode,
+            AMBER if run_mode.startswith("COUNTER") else ELECTRIC,
+            size=7,
+            height=16,
+            pad_x=6,
+        )
         self._t(
             "source",
             f"HMM {('SYNTHETIC' if 'SYNTHETIC' in snapshot.model_status else snapshot.model_status)}  •  "
@@ -613,6 +807,370 @@ class JudgeModePanel:
             if left <= x <= right and bottom <= y <= top:
                 return index
         return None
+
+
+class JudgeWalkthroughPanel:
+    """Modal, presentation-first explanation of the Judge Mode workflow."""
+
+    def __init__(self, width: float = 920.0, height: float = 520.0) -> None:
+        self.width = width
+        self.height = height
+        self._texts: dict[str, arcade.Text] = {}
+        self.action_rects: list[tuple[str, float, float, float, float]] = []
+        self.step_rects: list[tuple[int, float, float, float, float]] = []
+        self.hint_bounds: Optional[PanelBounds] = None
+
+    def _t(self, key: str, text: str, x: float, y: float, size: int,
+           color: RGB = TEXT, bold: bool = False,
+           anchor_x: str = "left") -> None:
+        obj = self._texts.get(key)
+        if obj is None:
+            obj = arcade.Text(text, x, y, color, size, bold=bold,
+                              anchor_x=anchor_x, anchor_y="center")
+            self._texts[key] = obj
+        else:
+            obj.text = text
+            obj.x = x
+            obj.y = y
+            obj.color = color
+            obj.font_size = size
+            obj.bold = bold
+        obj.draw()
+
+    def layout_bounds(self, window_width: float, window_height: float) -> PanelBounds:
+        width = min(self.width, max(320.0, float(window_width) - 40.0))
+        height = min(self.height, max(300.0, float(window_height) - 40.0))
+        return PanelBounds(
+            left=(float(window_width) - width) / 2.0,
+            bottom=(float(window_height) - height) / 2.0,
+            width=width,
+            height=height,
+        )
+
+    @staticmethod
+    def _contains(rect: tuple[float, float, float, float], x: float, y: float) -> bool:
+        left, bottom, right, top = rect
+        return left <= x <= right and bottom <= y <= top
+
+    def _button(self, action: str, label: str, left: float, bottom: float,
+                width: float, color: RGB = EDGE_SOFT) -> None:
+        rect = (left, bottom, left + width, bottom + 28.0)
+        self.action_rects.append((action, *rect))
+        arcade.draw_rect_filled(
+            arcade.XYWH(left + width / 2.0, bottom + 14.0, width, 28.0),
+            color,
+        )
+        arcade.draw_rect_outline(
+            arcade.XYWH(left + width / 2.0, bottom + 14.0, width, 28.0),
+            ELECTRIC if action == "next" else EDGE,
+            1,
+        )
+        self._t(
+            f"button_{action}", label, left + width / 2.0, bottom + 14.0,
+            9, TEXT, bold=True, anchor_x="center",
+        )
+
+    def _draw_live_proof(self, left: float, bottom: float, width: float,
+                         top: float, step_index: int,
+                         snapshot: Optional[JudgeModeSnapshot], branch: Any) -> None:
+        draw_panel(
+            left + width / 2.0,
+            bottom + (top - bottom) / 2.0,
+            width,
+            top - bottom,
+            fill=PANEL,
+            fill_alpha=238,
+            edge=EDGE,
+            edge_width=1,
+            accent=AMBER if branch is not None and getattr(branch, "outcomes", ())
+            else ELECTRIC,
+            accent_width=4,
+        )
+        pad = 14.0
+        self._t("proof_header", "LIVE PROOF", left + pad, top - 20, 10,
+                 MUTED, bold=True)
+
+        if branch is not None and getattr(branch, "outcomes", ()):
+            draw_chip(left + pad, top - 43, "COUNTERFACTUAL SIMULATION", AMBER,
+                      size=7, height=17, pad_x=6)
+            self._t(
+                "proof_source",
+                f"SOURCE: REAL TELEMETRY REPLAY  •  FRAME {branch.source_frame_index}",
+                left + pad, top - 65, 7, TEXT, bold=True,
+            )
+            y = top - 94
+            for index, outcome in enumerate(branch.outcomes[:3]):
+                color = AMBER if index == 0 else MUTED
+                self._t(
+                    f"proof_branch_name_{index}",
+                    outcome.action,
+                    left + pad,
+                    y,
+                    9,
+                    color,
+                    bold=index == 0,
+                )
+                self._t(
+                    f"proof_branch_gap_{index}",
+                    f"Δ gap {getattr(outcome, 'gap_change_s', 0.0):+.2f}s",
+                    left + pad + 100,
+                    y,
+                    8,
+                    TEXT,
+                )
+                self._t(
+                    f"proof_branch_store_{index}",
+                    f"store {getattr(outcome, 'final_energy', 0.0):.1f} EU",
+                    left + pad + 190,
+                    y,
+                    8,
+                    MUTED,
+                )
+                y -= 25
+            self._t(
+                "proof_branch_note",
+                "AVERAGED ACROSS 3 PLAUSIBLE RIVAL RESPONSES",
+                left + pad,
+                bottom + 22,
+                7,
+                AMBER,
+                bold=True,
+            )
+            return
+
+        draw_chip(left + pad, top - 43, "REAL TELEMETRY REPLAY", ELECTRIC,
+                  size=7, height=17, pad_x=6)
+        if snapshot is None:
+            self._t("proof_empty", "SELECT A DRIVER TO POPULATE THE DECISION VIEW",
+                     left + pad, top - 88, 9, TEXT, bold=True)
+            self._t("proof_empty_2", "The car ahead becomes the inferred rival.",
+                     left + pad, top - 113, 8, MUTED)
+            return
+
+        if step_index == 1:
+            self._t("proof_belief_header", "ERS CAPABILITY BELIEF",
+                     left + pad, top - 78, 9, MUTED, bold=True)
+            for index, mode in enumerate(snapshot.rival_modes):
+                y = top - 105 - index * 26
+                self._t(f"proof_mode_{index}", mode.mode, left + pad, y, 9,
+                         mode.color, bold=True)
+                meter_left = left + pad + 76
+                meter_width = max(100.0, width - 144.0)
+                draw_meter(meter_left, y, meter_width, 10,
+                           mode.probability, mode.color)
+                self._t(f"proof_mode_value_{index}",
+                         f"{mode.probability * 100:.0f}%",
+                         meter_left + meter_width + 8, y, 9, TEXT, bold=True)
+            self._t("proof_belief_note", "BELIEF ≠ RIVAL BATTERY SOC",
+                     left + pad, bottom + 22, 7, AMBER, bold=True)
+        elif step_index == 2:
+            self._t("proof_evidence_header", "PUBLIC EVIDENCE → WHY",
+                     left + pad, top - 78, 9, MUTED, bold=True)
+            for index, evidence in enumerate(snapshot.evidence[:5]):
+                self._t(f"proof_evidence_{index}", f"✓ {evidence}",
+                         left + pad, top - 105 - index * 24, 8, TEXT)
+            self._t("proof_evidence_note", "INPUTS STAY TRACEABLE TO PUBLIC CHANNELS",
+                     left + pad, bottom + 22, 7, ELECTRIC, bold=True)
+        elif step_index == 3:
+            self._t("proof_options_header", "POMCP ALTERNATIVES",
+                     left + pad, top - 78, 9, MUTED, bold=True)
+            for index, option in enumerate(snapshot.options[:3]):
+                y = top - 105 - index * 28
+                color = snapshot.command_color if option.selected else MUTED
+                marker = "SELECTED" if option.selected else "REJECTED"
+                self._t(f"proof_option_{index}", option.command, left + pad,
+                         y, 9, color, bold=option.selected)
+                self._t(f"proof_option_status_{index}", marker,
+                         left + pad + 112, y, 7, color, bold=option.selected)
+                self._t(f"proof_option_value_{index}",
+                         f"gap {option.gap_gain_s:+.2f}s  •  energy {option.energy_delta_eu:+.1f} EU",
+                         left + pad + 178, y, 7, TEXT)
+            self._t("proof_options_note", "DECISION UNITS, NOT RAW SOLVER SCORES",
+                     left + pad, bottom + 22, 7, ELECTRIC, bold=True)
+        else:
+            self._t("proof_recommend_header", "RECOMMENDATION",
+                     left + pad, top - 78, 9, MUTED, bold=True)
+            self._t("proof_recommendation", snapshot.command_label,
+                     left + pad, top - 108, 18, snapshot.command_color, bold=True)
+            self._t("proof_confidence",
+                     f"{snapshot.confidence * 100:.0f}% confidence  •  {snapshot.driver} P{snapshot.position}",
+                     left + pad, top - 136, 9, TEXT, bold=True)
+            self._t("proof_recommend_reason", snapshot.explanation[:72],
+                     left + pad, top - 164, 8, MUTED)
+            self._t("proof_recommend_note", "PRESS C WHEN PAUSED TO FORK THIS DECISION",
+                     left + pad, bottom + 22, 7, AMBER, bold=True)
+
+    def draw(self, window: Any, controller: JudgeWalkthroughController,
+             snapshot: Optional[JudgeModeSnapshot] = None, branch: Any = None,
+             scenario_label: str = "MONZA • ITALIAN GP",
+             visible: bool = True) -> None:
+        """Draw the walkthrough above the replay without changing replay state."""
+        if not visible or not controller.visible:
+            self.action_rects = []
+            self.step_rects = []
+            return
+        bounds = self.layout_bounds(window.width, window.height)
+        left, bottom, width, height = (
+            bounds.left, bounds.bottom, bounds.width, bounds.height
+        )
+        right, top = bounds.right, bounds.top
+        self.action_rects = []
+        self.step_rects = []
+
+        arcade.draw_rect_filled(
+            arcade.XYWH(window.width / 2.0, window.height / 2.0,
+                        window.width, window.height),
+            (0, 0, 0, 165),
+        )
+        draw_panel(
+            left + width / 2.0,
+            bottom + height / 2.0,
+            width,
+            height,
+            fill=PANEL,
+            fill_alpha=252,
+            edge=ELECTRIC,
+            edge_width=1,
+            accent=ELECTRIC,
+            accent_width=6,
+        )
+        pad = 26.0
+        self._t("walk_title", "HOW IT WORKS", left + pad, top - 28, 19,
+                 TEXT, bold=True)
+        draw_chip(left + pad + 250, top - 28, scenario_label, F1_RED,
+                  size=8, height=19, pad_x=7)
+        close_rect = (right - 112, top - 43, right - pad, top - 12)
+        self.action_rects.append(("close", *close_rect))
+        self._t("walk_close", "H / ?  CLOSE", right - pad, top - 28, 8,
+                 MUTED, bold=True, anchor_x="right")
+
+        steps = controller.steps
+        step_count = len(steps)
+        if step_count:
+            rail_left = left + pad
+            rail_width = width - 2.0 * pad
+            gap = 6.0
+            segment_width = (rail_width - gap * (step_count - 1)) / step_count
+            for index in range(step_count):
+                segment_left = rail_left + index * (segment_width + gap)
+                segment_color = ELECTRIC if index == controller.step_index else EDGE_SOFT
+                arcade.draw_rect_filled(
+                    arcade.XYWH(segment_left + segment_width / 2.0,
+                                top - 67,
+                                segment_width,
+                                5),
+                    segment_color,
+                )
+                self.step_rects.append((
+                    index, segment_left, top - 79,
+                    segment_left + segment_width, top - 55,
+                ))
+                self._t(f"walk_step_number_{index}", str(index + 1),
+                         segment_left + segment_width / 2.0, top - 88, 7,
+                         ELECTRIC if index == controller.step_index else MUTED,
+                         bold=True, anchor_x="center")
+
+        step = controller.current_step
+        if step is None:
+            return
+        index = controller.step_index
+        content_top = top - 120
+        left_width = width * 0.43
+        self._t("walk_kicker", f"STEP {index + 1} / {step_count}  •  {step.mode_label}",
+                 left + pad, content_top, 9, step.mode_color, bold=True)
+        self._t("walk_step_title", step.title, left + pad, content_top - 32,
+                 17, TEXT, bold=True)
+        self._t("walk_summary", step.summary, left + pad, content_top - 62,
+                 9, MUTED)
+        body_line_index = 0
+        for line in step.body:
+            for wrapped in textwrap.wrap(line, width=54) or (line,):
+                self._t(f"walk_body_{body_line_index}", wrapped,
+                         left + pad,
+                         content_top - 99 - body_line_index * 19,
+                         9,
+                         TEXT)
+                body_line_index += 1
+
+        callout_bottom = bottom + 80
+        callout_top = bottom + 166
+        draw_panel(
+            left + pad + (left_width - pad) / 2.0,
+            callout_bottom + (callout_top - callout_bottom) / 2.0,
+            left_width - pad,
+            callout_top - callout_bottom,
+            fill=(28, 28, 35),
+            fill_alpha=238,
+            edge=EDGE_SOFT,
+            edge_width=1,
+        )
+        self._t("walk_action_label", "TRY IT", left + pad + 14,
+                 callout_top - 20, 8, MUTED, bold=True)
+        self._t("walk_action", step.action_hint, left + pad + 14,
+                 callout_top - 49, 10, step.mode_color, bold=True)
+        self._t("walk_action_note", "The live proof card updates from the same frame.",
+                 left + pad + 14, callout_bottom + 18, 7, MUTED)
+
+        proof_left = left + left_width + 4.0
+        proof_bottom = bottom + 80
+        proof_top = top - 120
+        self._draw_live_proof(
+            proof_left,
+            proof_bottom,
+            right - pad - proof_left,
+            proof_top,
+            index,
+            snapshot,
+            branch,
+        )
+
+        footer_y = bottom + 28
+        self._button("previous", "←  PREVIOUS", left + pad, footer_y, 116.0)
+        self._button("next", "NEXT  →", right - pad - 116.0, footer_y, 116.0,
+                     color=(0, 95, 115))
+        self._t("walk_footer", "5–0 BOOKMARKS  •  C SIMULATE  •  SPACE RETURN TO REPLAY",
+                 left + width / 2.0, footer_y + 14.0, 7, MUTED,
+                 bold=True, anchor_x="center")
+
+    def hit_test(self, x: float, y: float) -> Optional[str]:
+        """Return a walkthrough action from the most recent draw."""
+        for action, left, bottom, right, top in self.action_rects:
+            if self._contains((left, bottom, right, top), x, y):
+                return action
+        for index, left, bottom, right, top in self.step_rects:
+            if self._contains((left, bottom, right, top), x, y):
+                return f"step:{index}"
+        return None
+
+    def draw_first_run_hint(self, window: Any, scenario_label: str,
+                            visible: bool = True) -> None:
+        """Draw the small first-run invitation before a judge opens help."""
+        if not visible:
+            self.hint_bounds = None
+            return
+        width = min(620.0, max(320.0, float(window.width) - 40.0))
+        height = 48.0
+        center_x = float(window.width) / 2.0
+        center_y = max(80.0, float(window.height) - 132.0)
+        self.hint_bounds = PanelBounds(
+            center_x - width / 2.0,
+            center_y - height / 2.0,
+            width,
+            height,
+        )
+        draw_panel(center_x, center_y, width, height, fill=PANEL,
+                   fill_alpha=245, edge=ELECTRIC, edge_width=1,
+                   accent=ELECTRIC, accent_width=4)
+        self._t("hint_title", "HOW IT WORKS", self.hint_bounds.left + 16,
+                 center_y + 8, 9, ELECTRIC, bold=True)
+        self._t(
+            "hint_body",
+            f"Press H or ? for the six-step {scenario_label} walkthrough",
+            self.hint_bounds.left + 16,
+            center_y - 10,
+            9,
+            TEXT,
+        )
 
 
 @dataclass(frozen=True)
