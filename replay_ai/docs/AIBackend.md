@@ -170,7 +170,9 @@ Run the multi-seed comparison with identical initial conditions:
 ```
 
 The matrix compares the full stack against these one-factor ablations over
-all hidden rival modes:
+all hidden rival modes and three plant conditions: nominal, energy stress and
+thermal stress. Stress conditions are deliberately used to expose controller
+components that are dormant in the nominal plant.
 
 - `no_mpc`
 - `no_search`

@@ -17,19 +17,23 @@ from src.intelligence.closed_loop import ClosedLoopSimulator, HiddenRivalMode
 
 
 CONTROLLERS = ("full", "no_mpc", "no_search", "no_soh", "no_spatial")
+SCENARIOS = ("nominal", "energy_stress", "thermal_stress")
 
 
-def episode(controller: str, mode: HiddenRivalMode, seed: int, steps: int) -> dict:
+def episode(controller: str, mode: HiddenRivalMode, scenario: str,
+            seed: int, steps: int) -> dict:
     simulator = ClosedLoopSimulator(
         mode, seed=seed,
         use_mpc=controller != "no_mpc",
         controller_variant=controller,
+        scenario=scenario,
     )
     trace = simulator.run(steps)
     burns = sum(step.decision.command == "BURN" for step in trace)
     return {
         "controller": controller,
         "rival_mode": mode.value,
+        "scenario": scenario,
         "seed": seed,
         "final_gap_s": simulator.ego.gap_s,
         "energy_used": 70.0 - simulator.ego.energy,
@@ -52,17 +56,18 @@ def _summary(values: list[float]) -> dict:
 
 
 def benchmark(seeds: list[int], steps: int = 100) -> dict:
-    rows = [episode(controller, mode, seed, steps)
+    rows = [episode(controller, mode, scenario, seed, steps)
             for seed in seeds
             for mode in HiddenRivalMode
+            for scenario in SCENARIOS
             for controller in CONTROLLERS]
     grouped = defaultdict(list)
     for row in rows:
-        key = (row["controller"], row["rival_mode"])
+        key = (row["controller"], row["rival_mode"], row["scenario"])
         grouped[key].append(row)
     summaries = {}
     for key, group in grouped.items():
-        summaries[f"{key[0]}:{key[1]}"] = {
+        summaries[f"{key[0]}:{key[1]}:{key[2]}"] = {
             "gap_s": _summary([row["final_gap_s"] for row in group]),
             "energy_used": _summary([row["energy_used"] for row in group]),
             "burn_steps": _summary([row["burn_steps"] for row in group]),

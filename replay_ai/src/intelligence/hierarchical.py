@@ -333,7 +333,10 @@ class MotorsportIntelligence:
         result = self.hmm.update(self.features.update(observation))
         self.last_hmm = result
         observed_gap = gap_s if gap_s is not None else observation.gap_s
-        plan = self.level2.plan(result, own_speed_kmh, observed_gap, own_soc)
+        tactical_wear_cost = ((1.0 - battery_soh) * 0.8
+                              if self.use_soh else 0.0)
+        plan = self.level2.plan(result, own_speed_kmh, observed_gap, own_soc,
+                                wear_cost=tactical_wear_cost)
         self.last_level2 = plan
         target = plan.reference_speed_kmh[0] if plan.reference_speed_kmh else own_speed_kmh
         feasible = plan.envelope.feasible and own_soc >= 5.0
