@@ -9,6 +9,7 @@ solver without changing the replay contract.
 """
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import dataclass
 from enum import Enum
@@ -120,6 +121,18 @@ class FortyStateHMM:
         self._belief: Dict[HMMState, float] = {s: 1.0 / len(STATES) for s in STATES}
         self._extractor = FeatureExtractor()
         self.emission_means = dict(emission_means or {})
+
+    @classmethod
+    def from_artifact(cls, path: str, **kwargs) -> "FortyStateHMM":
+        """Load fitted means produced by ``fit_hmm_emissions.py``."""
+        with open(path) as source:
+            artifact = json.load(source)
+        means = artifact.get("means", artifact)
+        # ``samples`` is metadata, never an emission parameter.
+        clean = {mode: {key: value for key, value in values.items()
+                        if key in {"dgap", "throttle_clip", "brake_delta"}}
+                 for mode, values in means.items()}
+        return cls(emission_means=clean, **kwargs)
 
     def observe(self, observation: RivalTelemetry) -> HMMResult:
         """Extract causal features and process one sector observation."""
