@@ -107,7 +107,8 @@ class F1RaceReplayWindow(arcade.Window):
         self.race_engineer = RaceEngineer(config=self._model_config)
         # Hierarchical public-telemetry backend.  FastF1 has no battery/SOC
         # channel, so the HMM output remains an explicitly labelled belief.
-        self.motorsport_intelligence = MotorsportIntelligence()
+        hmm_artifact = os.environ.get("HMM_EMISSIONS_ARTIFACT", "artifacts/hmm-emissions.json")
+        self.motorsport_intelligence = MotorsportIntelligence(hmm_artifact=hmm_artifact)
         self.race_engineer_hud = RaceEngineerHUD()
         self._energy_cache = {}
         self._focus_gap_ahead_s = None

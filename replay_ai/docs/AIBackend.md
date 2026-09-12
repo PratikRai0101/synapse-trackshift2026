@@ -55,6 +55,28 @@ The hidden state space is `ERS × override × tyre = 4 × 2 × 5 = 40`:
 look identical on a timing screen. Separating them is the point of the filter:
 the first means *do not attack*, the second means *attack now*.
 
+## Runtime artifact loading
+
+The replay loads the calibrated artifact from
+`artifacts/hmm-emissions.json` by default. Override it without changing code:
+
+```sh
+HMM_EMISSIONS_ARTIFACT=artifacts/hmm-emissions.json \
+  .venv/bin/python main.py
+```
+
+A missing or invalid artifact falls back to the default reference HMM so the
+replay still starts. The active source is exposed as `hmm_source` for reports
+and benchmark records.
+
+Compare runtime behaviour explicitly:
+
+```sh
+.venv/bin/python scripts/benchmark_closed_loop.py --steps 100
+.venv/bin/python scripts/benchmark_closed_loop.py --steps 100 \
+  --artifact artifacts/hmm-emissions.json
+```
+
 ## Pipeline
 
 Run from inside this directory.
