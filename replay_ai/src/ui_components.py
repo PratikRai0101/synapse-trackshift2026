@@ -52,7 +52,7 @@ class LegendComponent(BaseComponent):
                     texture_name = os.path.splitext(filename)[0]
                     texture_path = os.path.join(icons_folder, filename)
                     self._control_icons_textures[texture_name] = arcade.load_texture(texture_path)
-        self.lines = ["Help (Click or 'H')"]
+        self.lines = ["How It Works (Click, 'H' or '?')"]
         
         self.controls_text_offset = 180
         self._text = arcade.Text("", 0, 0, arcade.color.CYAN, 14)
@@ -90,6 +90,10 @@ class LegendComponent(BaseComponent):
         bottom = line_y - 18
 
         if left <= x <= right and bottom <= y <= top:
+            walkthrough_toggle = getattr(window, "_toggle_judge_walkthrough", None)
+            if callable(walkthrough_toggle):
+                walkthrough_toggle()
+                return True
             popup = getattr(window, "controls_popup_comp", None)
             if popup:
                 # popup anchored to bottom left, small margin (20px)
@@ -1081,7 +1085,8 @@ class ControlsPopupComponent(BaseComponent):
             ("J", "Judge / Engineer view"),
             ("5-0", "Scenario bookmarks; N/P next/previous"),
             ("C", "Counterfactual action branches"),
-            ("H", "Toggle Help Popup"),
+            ("H / ?", "How It Works walkthrough"),
+            ("K", "Technical controls popup"),
         ]
 
     def set_lines(self, lines: Optional[list[str]]):

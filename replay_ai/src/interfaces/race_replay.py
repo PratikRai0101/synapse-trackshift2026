@@ -30,8 +30,12 @@ from src.judge_mode import (
     JudgeModeController,
     JudgeModeModel,
     JudgeModePanel,
+    JudgeWalkthroughController,
+    JudgeWalkthroughPanel,
     build_bookmarks,
+    build_walkthrough_steps,
     run_counterfactual,
+    scenario_label_from_session,
 )
 from src.ui_theme import CARBON, EDGE, ELECTRIC, F1_RED, MUTED, PANEL, TEXT
 
@@ -87,6 +91,15 @@ class F1RaceReplayWindow(arcade.Window):
             enabled=judge_enabled, bookmarks=self.judge_bookmarks
         )
         self.judge_panel = JudgeModePanel()
+        self.judge_scenario_label = scenario_label_from_session(session_info)
+        self.judge_walkthrough_controller = JudgeWalkthroughController(
+            build_walkthrough_steps(
+                self.judge_bookmarks,
+                scenario_label=self.judge_scenario_label,
+            )
+        )
+        self.judge_walkthrough_panel = JudgeWalkthroughPanel()
+        self._judge_hint_age_s = 0.0
         self._judge_snapshot = None
         self._counterfactual_branch = None
         self._counterfactual_status = None
@@ -1488,6 +1501,10 @@ class F1RaceReplayWindow(arcade.Window):
         bookmark = self.judge_mode_controller.select(index)
         if bookmark is None:
             return
+        walkthrough = getattr(self, "judge_walkthrough_controller", None)
+        if walkthrough is not None:
+            walkthrough.dismiss_hint()
+            walkthrough.select_for_bookmark(index)
         self.frame_index = float(bookmark.frame_index)
         self.paused = True
         self._clear_counterfactual_branch()
@@ -1500,6 +1517,47 @@ class F1RaceReplayWindow(arcade.Window):
         if bookmark is None:
             return
         self._select_judge_bookmark(self.judge_mode_controller.active_index or 0)
+
+    def _step_judge_walkthrough(self, direction: int):
+        """Advance the help narrative and load its corresponding replay frame."""
+        walkthrough = getattr(self, "judge_walkthrough_controller", None)
+        if walkthrough is None or not walkthrough.visible:
+            return
+        step = walkthrough.step(direction)
+        if step is not None and step.bookmark_index is not None:
+            self._select_judge_bookmark(step.bookmark_index)
+
+    def _select_judge_walkthrough_step(self, index: int):
+        """Select a clicked walkthrough step and load its fixed bookmark."""
+        walkthrough = getattr(self, "judge_walkthrough_controller", None)
+        if walkthrough is None:
+            return
+        step = walkthrough.select(index)
+        if step is not None and step.bookmark_index is not None:
+            self._select_judge_bookmark(step.bookmark_index)
+
+    def _toggle_judge_walkthrough(self):
+        """Open/close the narrated Judge Mode flow while keeping replay paused."""
+        walkthrough = getattr(self, "judge_walkthrough_controller", None)
+        if walkthrough is None:
+            return False
+        visible = walkthrough.toggle()
+        if visible:
+            self._judge_hint_age_s = 0.0
+            self.paused = True
+            popup = getattr(self, "controls_popup_comp", None)
+            if popup is not None:
+                popup.hide()
+            branch = getattr(self, "_counterfactual_branch", None)
+            if branch is None and getattr(self, "judge_bookmarks", ()):
+                active = getattr(self.judge_mode_controller, "active_index", None)
+                if active is None:
+                    walkthrough.select(0)
+                    self._select_judge_bookmark(0)
+                else:
+                    walkthrough.select_for_bookmark(active)
+        self._refresh_decision_layout()
+        return visible
 
     def _launch_counterfactual(self):
         """Evaluate actions in isolated simulators from the selected public state."""
@@ -2150,6 +2208,7 @@ class F1RaceReplayWindow(arcade.Window):
 
         # Race Engineer decision HUD (estimated energy + overtake risk/reward)
         self._focus_report = None
+        self._judge_snapshot = None
         if not selected_drivers:
             self.judge_panel.bookmark_rects = []
         try:
@@ -2204,9 +2263,41 @@ class F1RaceReplayWindow(arcade.Window):
         
         # Draw tooltips and overlays on top of everything
         self.progress_bar_comp.draw_overlays(self)
+
+        walkthrough = getattr(self, "judge_walkthrough_controller", None)
+        walkthrough_panel = getattr(self, "judge_walkthrough_panel", None)
+        if walkthrough is not None and walkthrough_panel is not None:
+            if walkthrough.visible:
+                walkthrough_panel.draw(
+                    self,
+                    walkthrough,
+                    snapshot=self._judge_snapshot,
+                    branch=self._counterfactual_branch,
+                    scenario_label=getattr(
+                        self, "judge_scenario_label", "DETERMINISTIC REPLAY PATH"
+                    ),
+                    visible=getattr(self, "visible_hud", True),
+                )
+            else:
+                walkthrough_panel.draw_first_run_hint(
+                    self,
+                    getattr(self, "judge_scenario_label", "DETERMINISTIC REPLAY PATH"),
+                    visible=(
+                        getattr(self, "visible_hud", True)
+                        and walkthrough.first_run_hint_visible
+                    ),
+                )
                     
     def on_update(self, delta_time: float):
         self.race_controls_comp.on_update(delta_time)
+
+        walkthrough = getattr(self, "judge_walkthrough_controller", None)
+        if walkthrough is not None and walkthrough.first_run_hint_visible:
+            self._judge_hint_age_s = getattr(self, "_judge_hint_age_s", 0.0) + max(
+                0.0, float(delta_time)
+            )
+            if self._judge_hint_age_s >= 12.0:
+                walkthrough.dismiss_hint()
         
         seek_speed = 3.0 * max(1.0, self.playback_speed) # Multiplier for seeking speed, scales with current playback speed
         if self.is_rewinding:
@@ -2240,14 +2331,25 @@ class F1RaceReplayWindow(arcade.Window):
             if was_paused and not self.paused:
                 self.judge_mode_controller.active_index = None
                 self._clear_counterfactual_branch()
+                walkthrough = getattr(self, "judge_walkthrough_controller", None)
+                if walkthrough is not None and walkthrough.visible:
+                    walkthrough.close()
             self._broadcast_telemetry_state()
             self.race_controls_comp.flash_button('play_pause')
         elif symbol == arcade.key.RIGHT:
+            if getattr(getattr(self, "judge_walkthrough_controller", None),
+                       "visible", False):
+                self._step_judge_walkthrough(1)
+                return
             self._clear_counterfactual_branch()
             self.was_paused_before_hold = self.paused
             self.is_forwarding = True
             self.paused = True
         elif symbol == arcade.key.LEFT:
+            if getattr(getattr(self, "judge_walkthrough_controller", None),
+                       "visible", False):
+                self._step_judge_walkthrough(-1)
+                return
             self._clear_counterfactual_branch()
             self.was_paused_before_hold = self.paused
             self.is_rewinding = True
@@ -2315,6 +2417,9 @@ class F1RaceReplayWindow(arcade.Window):
             self.judge_mode_controller.active_index = None
             self._clear_counterfactual_branch()
             self._clear_intelligence_state()
+            walkthrough = getattr(self, "judge_walkthrough_controller", None)
+            if walkthrough is not None:
+                walkthrough.close()
             self._broadcast_telemetry_state()
             # Clear degradation cache on restart
             if self.degradation_integrator:
@@ -2327,8 +2432,16 @@ class F1RaceReplayWindow(arcade.Window):
         elif symbol == arcade.key.F:
             # Toggle Focus / Battle mode (selected + proximity rivals)
             self.focus_mode = not getattr(self, "focus_mode", True)
-        elif symbol == arcade.key.H:
-            # Toggle Controls popup with 'H' key — show anchored to bottom-left with 20px margin
+        elif symbol in (arcade.key.H, arcade.key.QUESTION) or (
+            symbol == arcade.key.SLASH
+            and modifiers & getattr(arcade.key, "MOD_SHIFT", 0)
+        ):
+            # H, ? and Shift+/ open the judge-facing explanation. It is a
+            # modal teaching surface; the recorded replay stays paused below.
+            self._toggle_judge_walkthrough()
+        elif symbol == arcade.key.K:
+            # Keep the lower-level controls popup available without competing
+            # with the judge-facing H/? walkthrough.
             margin_x = 20
             margin_y = 20
             left_pos = float(margin_x)
@@ -2357,6 +2470,20 @@ class F1RaceReplayWindow(arcade.Window):
             self.paused = self.was_paused_before_hold
 
     def on_mouse_press(self, x: float, y: float, button: int, modifiers: int):
+        walkthrough = getattr(self, "judge_walkthrough_controller", None)
+        walkthrough_panel = getattr(self, "judge_walkthrough_panel", None)
+        if walkthrough is not None and walkthrough.visible and walkthrough_panel is not None:
+            action = walkthrough_panel.hit_test(x, y)
+            if action == "close":
+                walkthrough.close()
+                self._refresh_decision_layout()
+            elif action == "previous":
+                self._step_judge_walkthrough(-1)
+            elif action == "next":
+                self._step_judge_walkthrough(1)
+            elif action is not None and action.startswith("step:"):
+                self._select_judge_walkthrough_step(int(action.split(":", 1)[1]))
+            return
         # forward to components; stop at first that handled it
         if self.controls_popup_comp.on_mouse_press(self, x, y, button, modifiers):
             return

@@ -2,12 +2,18 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.interfaces.race_replay import F1RaceReplayWindow
 from src.judge_mode import (
     BranchStart,
+    JudgeModeController,
     JudgeModeModel,
     JudgeModePanel,
+    JudgeWalkthroughController,
+    JudgeWalkthroughPanel,
     build_bookmarks,
+    build_walkthrough_steps,
     run_counterfactual,
+    scenario_label_from_session,
 )
 
 
@@ -207,3 +213,149 @@ def test_judge_panel_draws_against_a_window_contract(monkeypatch):
     assert any(kind == "text" and "Lderate" in text for kind, text in calls)
     assert any(kind == "text" and "POMCP" in text for kind, text in calls)
     assert any(kind == "draw_rect_filled" for kind, _ in calls)
+
+
+def test_walkthrough_is_a_deterministic_monza_path():
+    bookmarks = build_bookmarks(frame_count=101, total_laps=53)
+    steps = build_walkthrough_steps(
+        bookmarks,
+        scenario_label=scenario_label_from_session({
+            "event_name": "Italian Grand Prix",
+            "circuit_name": "Monza",
+            "country": "Italy",
+        }),
+    )
+
+    assert len(steps) == 6
+    assert [step.bookmark_index for step in steps] == [0, 1, 2, 3, 4, 5]
+    assert steps[0].mode_label == "REAL TELEMETRY REPLAY"
+    assert steps[4].mode_label == "COUNTERFACTUAL SIMULATION"
+    assert "MONZA" in steps[0].body[0]
+    assert "Press 5" in steps[0].action_hint
+    assert scenario_label_from_session({"circuit_name": "Suzuka"}) == (
+        "SUZUKA • DETERMINISTIC PATH"
+    )
+
+
+def test_walkthrough_controller_tracks_hint_and_bookmark_steps():
+    controller = JudgeWalkthroughController(build_walkthrough_steps())
+
+    assert controller.visible is False
+    assert controller.first_run_hint_visible is True
+    assert controller.open() is True
+    assert controller.first_run_hint_visible is False
+    assert controller.current_step.title == "START WITH REAL TELEMETRY"
+    assert controller.step(1).title == "READ THE CAPABILITY BELIEF"
+    assert controller.select_for_bookmark(4).title == "FORK THE DECISION"
+    assert controller.step(1).title == "RETURN TO OBSERVED HISTORY"
+    assert controller.step(1).title == "RETURN TO OBSERVED HISTORY"
+    assert controller.close() is False
+
+
+def test_walkthrough_panel_draws_replay_and_simulation_badges(monkeypatch):
+    calls = []
+
+    class FakeText:
+        def __init__(self, *args, **kwargs):
+            self.text = args[0] if args else ""
+            self.x = args[1] if len(args) > 1 else 0
+            self.y = args[2] if len(args) > 2 else 0
+            self.color = kwargs.get("color", (255, 255, 255))
+            self.font_size = kwargs.get("font_size", 10)
+            self.bold = kwargs.get("bold", False)
+
+        def draw(self):
+            calls.append(("text", self.text))
+
+    monkeypatch.setattr("src.judge_mode.arcade.Text", FakeText)
+    for name in ("draw_rect_filled", "draw_rect_outline", "draw_text"):
+        monkeypatch.setattr("src.judge_mode.arcade." + name,
+                            lambda *args, _name=name, **kwargs: calls.append((_name, args)))
+
+    window = SimpleNamespace(width=1280, height=720)
+    controller = JudgeWalkthroughController(build_walkthrough_steps())
+    controller.open()
+    panel = JudgeWalkthroughPanel()
+    panel.draw(window, controller, snapshot=JudgeModeModel.from_report(_report()))
+
+    assert any(kind == "text" and "HOW IT WORKS" in text for kind, text in calls)
+    assert any(kind == "text" and "REAL TELEMETRY REPLAY" in text
+               for kind, text in calls)
+
+    calls.clear()
+    controller.select_for_bookmark(4)
+    branch = SimpleNamespace(
+        source_frame_index=42,
+        outcomes=(
+            SimpleNamespace(action="BURN", gap_change_s=-0.2, final_energy=51.0),
+            SimpleNamespace(action="HARVEST", gap_change_s=0.1, final_energy=63.0),
+        ),
+    )
+    panel.draw(window, controller, snapshot=JudgeModeModel.from_report(_report()),
+              branch=branch)
+
+    assert any(kind == "text" and "COUNTERFACTUAL SIMULATION" in text
+               for kind, text in calls)
+    assert any(kind == "text" and "SOURCE: REAL TELEMETRY REPLAY" in text
+               for kind, text in calls)
+
+
+def test_walkthrough_window_flow_keeps_bookmark_and_branch_separate(monkeypatch):
+    window = object.__new__(F1RaceReplayWindow)
+    window.frames = [{"t": 0.0}, {"t": 1.0}, {"t": 2.0}, {"t": 3.0},
+                     {"t": 4.0}, {"t": 5.0}, {"t": 6.0}]
+    window.n_frames = len(window.frames)
+    window.frame_index = 0.0
+    window.paused = False
+    window.judge_bookmarks = build_bookmarks(len(window.frames), 1)
+    window.judge_mode_controller = JudgeModeController(
+        enabled=True, bookmarks=window.judge_bookmarks
+    )
+    window.judge_walkthrough_controller = JudgeWalkthroughController(
+        build_walkthrough_steps(window.judge_bookmarks)
+    )
+    window._judge_hint_age_s = 0.0
+    window._counterfactual_branch = None
+    window._counterfactual_status = None
+    window._counterfactual_running = False
+    window._intelligence_models = {}
+    window._intelligence_cache = {}
+    window._last_intelligence_key = None
+    window._last_tactical = None
+    window._last_rival_hmm = None
+    window._last_lap_plan = None
+    window._last_runtime_metrics = {}
+    window._broadcast_telemetry_state = lambda: None
+    window._refresh_decision_layout = lambda: None
+    window._focus_report = SimpleNamespace(
+        branch_start=BranchStart(
+            frame_index=0, timestamp_s=0.0, driver="EGO", rival="RIV",
+            own_speed_kmh=300.0, rival_speed_kmh=299.0, gap_s=0.7,
+            own_energy=60.0,
+        )
+    )
+
+    window._toggle_judge_walkthrough()
+    assert window.judge_walkthrough_controller.visible is True
+    assert window.frame_index == window.judge_bookmarks[0].frame_index
+    assert window.paused is True
+
+    for _ in range(4):
+        window._step_judge_walkthrough(1)
+    assert window.judge_walkthrough_controller.current_step.title == "FORK THE DECISION"
+    assert window.frame_index == window.judge_bookmarks[4].frame_index
+
+    branch = SimpleNamespace(status_text="COUNTERFACTUAL • 3 PLAUSIBLE MODES • 3 ACTIONS")
+    monkeypatch.setattr("src.interfaces.race_replay.run_counterfactual",
+                        lambda start, steps, seed: branch)
+    window._launch_counterfactual()
+    assert window._counterfactual_branch is branch
+    assert window.frames[0]["t"] == 0.0
+
+    # Selecting a different recorded bookmark clears only the isolated branch;
+    # the original frame list remains byte-for-byte the same objects.
+    original_frames = list(window.frames)
+    window._select_judge_bookmark(5)
+    assert window._counterfactual_branch is None
+    assert window.frame_index == window.judge_bookmarks[5].frame_index
+    assert window.frames == original_frames
