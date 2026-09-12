@@ -87,10 +87,13 @@ class BoundedScenarioPlanner:
     """
 
     def __init__(self, envelope: PerformanceEnvelope | None = None,
-                 search_config: SearchConfig | None = None) -> None:
+                 search_config: SearchConfig | None = None,
+                 use_search: bool = True, use_spatial: bool = True) -> None:
         self.envelope = envelope or PerformanceEnvelope()
         self.searcher = BoundedPOMCP(search_config)
         self.spatial = SpatialTrajectoryPlanner()
+        self.use_search = use_search
+        self.use_spatial = use_spatial
 
     def plan(self, hmm: HMMResult, own_speed_kmh: float, gap_s: float,
              energy: float, curvature: float = 0.0) -> Level2Plan:
@@ -116,7 +119,7 @@ class BoundedScenarioPlanner:
                                          score))
         selected = max(scored, key=lambda action: action.score)
         search = self.searcher.search(hmm, gap_s, energy)
-        search_allowed = (
+        search_allowed = self.use_search and (
             (search.action != "BURN" or p[ERSMode.DERATE.value] >= 0.40) and
             (search.action != "HARVEST" or p[ERSMode.HARVEST.value] >= 0.40 or energy < 30.0)
         )
@@ -127,9 +130,14 @@ class BoundedScenarioPlanner:
                                    max(0.0, curvature + 0.0002 * index))
                       for index in range(5))
         tactical_speed = max(0.0, own_speed_kmh + selected.expected_gap_change_s * 20.0)
-        spatial = self.spatial.plan(track, tactical_speed, speed_gain_kmh=0.0)
-        reference = spatial.speeds_kmh
-        lambda_kin = spatial.kinetic_costates
+        spatial = (self.spatial.plan(track, tactical_speed, speed_gain_kmh=0.0)
+                   if self.use_spatial else None)
+        if spatial is None:
+            reference = tuple(envelope.speed_limit_kmh for _ in range(5))
+            lambda_kin = tuple(0.0 for _ in range(5))
+        else:
+            reference = spatial.speeds_kmh
+            lambda_kin = spatial.kinetic_costates
         lambda_b = max(0.01, (100.0 - energy) / 100.0)
         return Level2Plan(selected.command, reference, lambda_kin, lambda_b,
                           tuple(scored), envelope, search.values, spatial)

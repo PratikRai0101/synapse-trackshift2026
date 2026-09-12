@@ -16,8 +16,15 @@ except ImportError:
 from src.intelligence.closed_loop import ClosedLoopSimulator, HiddenRivalMode
 
 
+CONTROLLERS = ("full", "no_mpc", "no_search", "no_soh", "no_spatial")
+
+
 def episode(controller: str, mode: HiddenRivalMode, seed: int, steps: int) -> dict:
-    simulator = ClosedLoopSimulator(mode, seed=seed, use_mpc=controller == "full")
+    simulator = ClosedLoopSimulator(
+        mode, seed=seed,
+        use_mpc=controller != "no_mpc",
+        controller_variant=controller,
+    )
     trace = simulator.run(steps)
     burns = sum(step.decision.command == "BURN" for step in trace)
     return {
@@ -48,7 +55,7 @@ def benchmark(seeds: list[int], steps: int = 100) -> dict:
     rows = [episode(controller, mode, seed, steps)
             for seed in seeds
             for mode in HiddenRivalMode
-            for controller in ("full", "no_mpc")]
+            for controller in CONTROLLERS]
     grouped = defaultdict(list)
     for row in rows:
         key = (row["controller"], row["rival_mode"])
