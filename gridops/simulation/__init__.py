@@ -23,6 +23,20 @@ from .geometry import (
     footprint_within_track,
     rectangles_overlap,
 )
+from .tyres import (
+    Compound,
+    CompoundParams,
+    TyreParams,
+    TyreSetState,
+    compounded_grip_multiplier,
+    default_tyre_params,
+    fresh_set,
+    grip_multiplier,
+    heat_input_w,
+    integrate as integrate_tyres,
+    reset_for_new_set,
+    utilisation_stress,
+)
 
 __all__ = [
     "TerminalPowerResult",
@@ -48,4 +62,16 @@ __all__ = [
     "footprint_corners",
     "footprint_within_track",
     "rectangles_overlap",
+    "Compound",
+    "CompoundParams",
+    "TyreParams",
+    "TyreSetState",
+    "compounded_grip_multiplier",
+    "default_tyre_params",
+    "fresh_set",
+    "grip_multiplier",
+    "heat_input_w",
+    "integrate_tyres",
+    "reset_for_new_set",
+    "utilisation_stress",
 ]

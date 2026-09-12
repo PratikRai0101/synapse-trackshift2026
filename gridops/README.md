@@ -26,6 +26,7 @@ Use the venv at the repository root: `../.venv/bin/python`.
 | `simulation/track.py` | fixed-path geometry, synthetic circuit | done |
 | `simulation/rivals.py` | reactive policy families (stationary/matching/aggressive/conserving/delayed/ignoring) | done |
 | `simulation/geometry.py` | world path, oriented footprints, SAT overlap, track containment, pass monitor | done, tested |
+| `simulation/tyres.py` | compound thermal state + irreversible wear, grip map, set reset | done, tested |
 | `decision/commitment.py` | pricing, reserve guard, no-progress guard, commitment ledger | done, tested |
 | `decision/pomcp.py` | POMCP history-tree search over a generative model | done, tested |
 | `decision/planning.py` | conditional convex deployment planner (CVXPY + Clarabel), DCP/residual/trust-region checks | done, tested |
@@ -38,7 +39,7 @@ Use the venv at the repository root: `../.venv/bin/python`.
 
 ## Test coverage
 
-75 tests. Highlights:
+86 tests. Highlights:
 
 - **Battery:** OCV/current-root identity, energy conservation derivative,
   current/voltage/SOC saturation, cooling, no post-hoc SOC clipping.
@@ -60,6 +61,10 @@ Use the venv at the repository root: `../.venv/bin/python`.
   perpendicular, footprint corners, SAT overlap and separation, track
   containment, and pass classification — contact and track exit can never be
   counted as a pass, clearance must persist, re-passes are counted separately.
+- **Tyres:** wear never decreases, cooling recovers temperature but not wear,
+  softer compounds wear faster, grip has a thermal optimum and is monotone in
+  wear, a new set resets only tyre state, and the **R09 paired ablation** shows
+  a worn set reduces pace and raises grip saturation.
 
 ## Conventions frozen at G0
 

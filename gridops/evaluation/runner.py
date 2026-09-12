@@ -23,6 +23,7 @@ from ..contracts.state import (
 from ..race_value.lap_map import TerminalValue, usable_energy_j
 from ..simulation.plant import Plant, initial_state
 from ..simulation.geometry import PassMonitor, PassOutcome, TrackPath
+from ..simulation.tyres import Compound, TyreParams, TyreSetState, fresh_set
 from ..simulation.rivals import (
     RivalPolicy,
     RivalPolicyConfig,
@@ -45,6 +46,9 @@ class EpisodeConfig:
     initial_speed_mps: float = 80.0
     laps_remaining: int = 20
     run_mode: str = "simulation"
+    compound: str = "medium"
+    compound_identity: str = "C4"
+    initial_wear: float = 0.0
 
 
 @dataclass
@@ -125,6 +129,7 @@ class EpisodeRunner:
         terminal_value: TerminalValue,
         config: EpisodeConfig,
         rival_config: RivalPolicyConfig | None = None,
+        tyre_params: TyreParams | None = None,
     ) -> None:
         self.track = track
         self.vehicle = vehicle
@@ -132,8 +137,9 @@ class EpisodeRunner:
         self.terminal_value = terminal_value
         self.config = config
         self.rival_config = rival_config or RivalPolicyConfig()
-        self._ego_plant = Plant(vehicle, battery, track)
-        self._rival_plant = Plant(vehicle, battery, track)
+        self.tyre_params = tyre_params
+        self._ego_plant = Plant(vehicle, battery, track, tyre_params)
+        self._rival_plant = Plant(vehicle, battery, track, tyre_params)
 
     def run(
         self,
@@ -147,12 +153,19 @@ class EpisodeRunner:
         cfg = self.config
         path = TrackPath(self.track)
         monitor = PassMonitor(self.track)
+        tyres = self._initial_tyres()
         ego = initial_state(
-            self.battery, progress_m=cfg.ego_progress_m, speed_mps=cfg.initial_speed_mps
+            self.battery,
+            progress_m=cfg.ego_progress_m,
+            speed_mps=cfg.initial_speed_mps,
+            tyres=tyres.copy() if tyres is not None else None,
         )
         rival = RivalRuntime(
             state=initial_state(
-                self.battery, progress_m=cfg.rival_progress_m, speed_mps=cfg.initial_speed_mps
+                self.battery,
+                progress_m=cfg.rival_progress_m,
+                speed_mps=cfg.initial_speed_mps,
+                tyres=tyres.copy() if tyres is not None else None,
             ),
             policy=rival_policy,
         )
@@ -261,3 +274,17 @@ class EpisodeRunner:
         report.contacts = monitor.contacts
         report.track_exits = monitor.exits
         return report
+
+    def _initial_tyres(self) -> TyreSetState | None:
+        if self.tyre_params is None:
+            return None
+        state = fresh_set(
+            Compound(self.config.compound),
+            self.config.compound_identity,
+            set_id=1,
+            params=self.tyre_params,
+        )
+        if self.config.initial_wear > 0.0:
+            state.wear_front = self.config.initial_wear
+            state.wear_rear = self.config.initial_wear
+        return state
