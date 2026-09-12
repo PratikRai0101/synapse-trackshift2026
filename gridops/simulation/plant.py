@@ -37,6 +37,7 @@ from .tyres import (
     integrate as integrate_tyres,
     utilisation_stress,
 )
+from ..contracts.ruleset import Ruleset
 
 MIN_TRACKING_SPEED_MPS = 3.0
 SPEED_ERROR_GAIN_PER_S = 1.5
@@ -60,6 +61,7 @@ class PlantStep:
     grip_limit_n: float
     grip_violation_n: float
     saturation: tuple[SaturationReason, ...] = ()
+    rule_reason: str | None = None
     notes: tuple[str, ...] = ()
 
 
@@ -69,6 +71,7 @@ class Plant:
     battery: BatteryParams
     track: Track
     tyre_params: TyreParams | None = None
+    rules: Ruleset | None = None
 
     def mass_kg(self, state: VehicleState) -> float:
         return self.vehicle.mass_kg + state.fuel_kg
@@ -86,11 +89,23 @@ class Plant:
         kappa = self.track.curvature_at(state.progress_m)
         grade = self.track.grade_at(state.progress_m)
 
+        # --- rules: clamp the requested deployment to the event envelope.
+        # An unresolved restricted mode falls back to the normal envelope and
+        # reports why; it is never silently granted.
+        reasons: list[SaturationReason] = []
+        requested_p_k_dc = control.p_k_dc_w
+        rule_reason: str | None = None
+        if self.rules is not None:
+            limit_w, rule_reason = self.rules.deployment_limit_w(v, control.overtake)
+            requested_p_k_dc = max(-limit_w, min(limit_w, requested_p_k_dc))
+            if abs(requested_p_k_dc - control.p_k_dc_w) > 1e-6:
+                reasons.append(SaturationReason.RULE_LIMIT)
+
         # --- battery: requested terminal power includes auxiliary load.
-        p_term_req = control.p_k_dc_w + self.battery.aux_power_w
+        p_term_req = requested_p_k_dc + self.battery.aux_power_w
         power = solve_terminal_power(p_term_req, state.battery, self.battery, dt_s)
         realized_p_k_dc = power.power_w - self.battery.aux_power_w
-        reasons = list(power.reasons)
+        reasons.extend(power.reasons)
 
         # --- MGU-K mechanical power and force at the wheels.
         if realized_p_k_dc >= 0.0:
@@ -182,6 +197,7 @@ class Plant:
             grip_limit_n=f_long_limit,
             grip_violation_n=violation,
             saturation=tuple(dict.fromkeys(reasons)),
+            rule_reason=rule_reason,
         )
 
     def _deployment_force(self, p_mech_w: float, speed_mps: float) -> float:

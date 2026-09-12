@@ -136,6 +136,7 @@ class EpisodeRunner:
         config: EpisodeConfig,
         rival_config: RivalPolicyConfig | None = None,
         tyre_params: TyreParams | None = None,
+        rules=None,
     ) -> None:
         self.track = track
         self.vehicle = vehicle
@@ -144,8 +145,9 @@ class EpisodeRunner:
         self.config = config
         self.rival_config = rival_config or RivalPolicyConfig()
         self.tyre_params = tyre_params
-        self._ego_plant = Plant(vehicle, battery, track, tyre_params)
-        self._rival_plant = Plant(vehicle, battery, track, tyre_params)
+        self.rules = rules
+        self._ego_plant = Plant(vehicle, battery, track, tyre_params, rules)
+        self._rival_plant = Plant(vehicle, battery, track, tyre_params, rules)
 
     def run(
         self,
@@ -221,6 +223,8 @@ class EpisodeRunner:
                     target_speed_mps=decision.target_speed_mps,
                     horizon_s=cfg.replan_interval_s,
                     lateral_target_m=decision.lateral_target_m,
+                    overtake=decision.family
+                    in (ActionFamily.ATTACK_NOW, ActionFamily.PROBE),
                 )
                 report.decisions.append(
                     {

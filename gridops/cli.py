@@ -33,6 +33,7 @@ from .race_value.lap_map import default_terminal_value
 from .simulation.rivals import RivalPolicy
 from .simulation.track import synthetic_circuit
 from .simulation.tyres import default_tyre_params
+from .contracts.ruleset import default_ruleset
 
 REQUIRED_KEYS = (
     "schema_version",
@@ -151,6 +152,7 @@ def _build_runner(data: dict[str, Any]) -> EpisodeRunner:
         terminal_value=default_terminal_value(battery),
         config=config,
         tyre_params=default_tyre_params(),
+        rules=default_ruleset(),
     )
 
 

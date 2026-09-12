@@ -459,16 +459,32 @@ class AmbiguityAwareController:
         requested = _target_speed(family, decision_input.ego_speed_mps)
         target = requested
         capped = False
+        # Project the rival at the *worst retained policy's* speed, not just its
+        # observed speed: a defending rival accelerates to close, and an observed
+        # speed alone under-predicts that.
+        guard_rival_speed = None
+        if decision_input.opponent_speed_mps is not None:
+            guard_rival_speed = decision_input.opponent_speed_mps
+            if self.response_fn is not None:
+                worst = max(
+                    (
+                        self.response_fn(family, p.policy)
+                        for p in self.belief.particles
+                        if p.weight > 0.0
+                    ),
+                    default=guard_rival_speed,
+                )
+                guard_rival_speed = max(guard_rival_speed, worst)
         # Hard contact feasibility: never commit a target speed that projects a
         # modelled contact. A capped target means the ego may move laterally now
         # and close on a later cycle, not that it drives through the rival.
-        if self.contact_guard is not None and decision_input.opponent_speed_mps is not None:
+        if self.contact_guard is not None and guard_rival_speed is not None:
             target = self.contact_guard.max_safe_target_speed(
                 ego_progress_m=decision_input.ego_progress_m,
                 ego_speed_mps=decision_input.ego_speed_mps,
                 ego_lateral_m=decision_input.ego_lateral_m,
                 rival_progress_m=decision_input.ego_progress_m + decision_input.gap_m,
-                rival_speed_mps=decision_input.opponent_speed_mps,
+                rival_speed_mps=guard_rival_speed,
                 rival_lateral_m=0.0,
                 desired_target_speed_mps=requested,
                 ego_target_lateral_m=_target_lateral(family),
@@ -478,7 +494,7 @@ class AmbiguityAwareController:
         if self.planner is None:
             return self._scale_power(
                 _power_for_family(family, TacticalParams()), target, requested, capped,
-                decision_input,
+                decision_input, guard_rival_speed,
             ), target, ()
         # Attack families must hold pace, so they use a tight lower trust bound
         # and therefore actually deploy; other families may trade speed away.
@@ -515,6 +531,7 @@ class AmbiguityAwareController:
         requested: float,
         capped: bool,
         decision_input: DecisionInput,
+        rival_speed_mps: float | None = None,
     ) -> float:
         """Deploy only what the (possibly contact-capped) target needs.
 

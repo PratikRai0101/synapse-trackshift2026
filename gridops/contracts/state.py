@@ -139,6 +139,7 @@ class Control:
     target_speed_mps: float
     horizon_s: float = 1.0
     lateral_target_m: float = 0.0
+    overtake: bool = False
 
 
 @dataclass(frozen=True)

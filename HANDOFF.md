@@ -7,7 +7,7 @@ imported here.
 
 ## What is built and passing
 
-125 passing, 1 xfailed (`python -m pytest`). See `gridops/README.md` for the module table.
+133 passing, 1 xfailed (`python -m pytest`). See `gridops/README.md` for the module table.
 
 Working and verified:
 
@@ -55,6 +55,12 @@ Working and verified:
   assumption. Exposes the same surface as the particle belief, so M can run on
   either backend and the two are directly comparable (`ambiguity_aware` vs
   `ambiguity_aware_hmm` vs `ambiguity_aware_hmm_stationary`).
+- **Event rules engine** (`contracts/ruleset.py`): the verified FIA 2026
+  deployment envelope with its breakpoints, versioned permissions, and the rule
+  that an UNKNOWN permission disables the affected restricted mode rather than
+  assuming it granted. The plant clamps requested deployment to the envelope and
+  records `RULE_LIMIT` plus the fallback reason. Event supplements remain
+  unresolved and are labelled as such.
 - **Frozen paired batch and ablation matrix** (`evaluation/batch.py`): seeded
   controllers x rival policies x seeds, paired on initial conditions, failures
   recorded rather than dropped, completion rates beside every metric, per-seed
@@ -141,6 +147,10 @@ Read this honestly:
 4. **Tyres are now in the plant; pit stops are not.** Compound thermal/wear
    affects grip and the R09 ablation passes. There is no pit-stop event that
    calls `reset_for_new_set`, and no compound choice optimisation.
+4. **Rules are partially enforced.** The deployment envelope and restricted-mode
+   permissions are enforced. The ES energy swing, per-lap recharge limit and
+   MGU-K torque limit are stored and reported but not yet integrated as hard
+   plant constraints. Event supplements are unresolved.
 5. **No public replay adapter.** The config produces synthetic observations;
    the replay repo would supply real ones.
 6. **The planner realization is more frugal but does not yet close.**
@@ -169,14 +179,13 @@ Read this honestly:
 ## Next slices, by owner
 
 **Developer A (simulation/control)**
-1. Calibrate the family-to-planner mapping so a committed attack closes; then
-   record the planner's predicted profile beside the plant's realized
-   trajectory per decision (model-mismatch reporting).
-2. Wire a pit-stop event that calls `reset_for_new_set` and rebases the lap map.
+1. Wire `RaceValueMap` into the controller's tactical cost so remaining-race
+   value influences the commitment directly (R08), rather than only through the
+   terminal value.
+2. Enforce the remaining rules as hard constraints: ES swing, per-lap recharge
+   and torque limit.
 3. Cache candidate profiles per valid state and benchmark cold vs warm solve
    time before the batch.
-4. Unify the grip envelope: the plant uses a circular envelope, the planner an
-   `rx/ry` ellipse.
 
 **Developer B (evidence/evaluation)**
 1. **Calibrate the belief likelihood.** Fit the surrogate closure means (or the

@@ -1,6 +1,15 @@
 """Contracts: units, provenance, physical state and external records."""
 
 from .provenance import Provenance
+from .ruleset import (
+    Permission,
+    Ruleset,
+    default_ruleset,
+    load_ruleset,
+    normal_power_limit_kw,
+    overtake_power_limit_kw,
+    ruleset_from_dict,
+)
 from .records import (
     SCHEMA_VERSION,
     DecisionInput,
@@ -27,6 +36,13 @@ from .state import (
 
 __all__ = [
     "Provenance",
+    "Permission",
+    "Ruleset",
+    "default_ruleset",
+    "load_ruleset",
+    "normal_power_limit_kw",
+    "overtake_power_limit_kw",
+    "ruleset_from_dict",
     "SCHEMA_VERSION",
     "DecisionInput",
     "DecisionStatus",
