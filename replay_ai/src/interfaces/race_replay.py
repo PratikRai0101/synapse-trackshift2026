@@ -33,6 +33,7 @@ from src.judge_mode import (
     JudgeWalkthroughController,
     JudgeWalkthroughPanel,
     build_bookmarks,
+    build_scenario_bookmarks,
     build_walkthrough_steps,
     run_counterfactual,
     scenario_label_from_session,
@@ -50,7 +51,7 @@ class F1RaceReplayWindow(arcade.Window):
                  playback_speed=1.0, driver_colors=None, circuit_rotation=0.0,
                  left_ui_margin=340, right_ui_margin=260, total_laps=None, visible_hud=True,
                  session_info=None, session=None, enable_telemetry=False,
-                 race_control_messages=None):
+                 race_control_messages=None, scenario_bookmarks=None):
         # Set resizable to True so the user can adjust mid-sim
         super().__init__(SCREEN_WIDTH, SCREEN_HEIGHT, title, resizable=True)
         self.maximize()
@@ -86,6 +87,7 @@ class F1RaceReplayWindow(arcade.Window):
         judge_enabled = os.environ.get("F1_JUDGE_MODE", "1").lower() not in {
             "0", "false", "off"
         }
+        self._scenario_targets = dict(scenario_bookmarks or {})
         self.judge_bookmarks = build_bookmarks(self.n_frames, total_laps)
         self.judge_mode_controller = JudgeModeController(
             enabled=judge_enabled, bookmarks=self.judge_bookmarks
@@ -1709,6 +1711,35 @@ class F1RaceReplayWindow(arcade.Window):
         self.bottom_ui_reserved = self._required_bottom_ui_reserve()
         self.update_scaling(self.width, self.height)
 
+    def _apply_scenario_bookmarks(self):
+        """Point the 5-0 slots at this driver's detected decision moments.
+
+        Falls back to the even phase bookmarks when the scan artifact has no
+        entry for the selection, so Judge Mode never ends up with a partial or
+        stale bookmark rail.
+        """
+        selected = list(getattr(self, "selected_drivers", ()) or ())
+        if not selected and getattr(self, "selected_driver", None):
+            selected = [self.selected_driver]
+        driver = selected[0] if selected else None
+        targets = self._scenario_targets.get(driver) if driver else None
+        if targets:
+            bookmarks = build_scenario_bookmarks(
+                targets, self.n_frames, self.total_laps
+            )
+        else:
+            bookmarks = build_bookmarks(self.n_frames, self.total_laps)
+        self.judge_bookmarks = bookmarks
+        self.judge_mode_controller.bookmarks = bookmarks
+        self.judge_mode_controller.active_index = None
+        walkthrough = getattr(self, "judge_walkthrough_controller", None)
+        if walkthrough is not None:
+            walkthrough.steps = build_walkthrough_steps(
+                bookmarks, scenario_label=self.judge_scenario_label
+            )
+            if walkthrough.step_index >= len(walkthrough.steps):
+                walkthrough.step_index = 0
+
     def update_scaling(self, screen_w, screen_h):
         """
         Recalculates the scale and translation to fit the track 
@@ -2511,6 +2542,7 @@ class F1RaceReplayWindow(arcade.Window):
         if self.leaderboard_comp.on_mouse_press(self, x, y, button, modifiers):
             if tuple(getattr(self, "selected_drivers", []) or []) != previous_selection:
                 self._clear_counterfactual_branch()
+                self._apply_scenario_bookmarks()
                 self._refresh_decision_layout()
             return
         if self.legend_comp.on_mouse_press(self, x, y, button, modifiers):
@@ -2531,6 +2563,7 @@ class F1RaceReplayWindow(arcade.Window):
         self._battle_ordered = []
         self._battle_codes_set = set()
         self._clear_counterfactual_branch()
+        self._apply_scenario_bookmarks()
         self.judge_panel.bookmark_rects = []
         self._refresh_decision_layout()
         
