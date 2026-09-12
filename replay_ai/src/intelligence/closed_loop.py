@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from .hierarchical import MotorsportIntelligence, RivalTelemetry, TacticalDecision
+from .control_layers import FastExecutionController
 
 
 class HiddenRivalMode(str, Enum):
@@ -71,6 +72,8 @@ class ClosedLoopSimulator:
         self.battery_temperature = 70.0
         self.model = MotorsportIntelligence(hmm_artifact=hmm_artifact,
                                              lap_map_artifact=lap_map_artifact)
+        self.execution = FastExecutionController()
+        self.last_mpc_result = None
 
     def _observation(self) -> RivalTelemetry:
         # Only the rival's public channels enter the model. Rival SOC/mode is
@@ -106,10 +109,17 @@ class ClosedLoopSimulator:
         target = decision.lap_energy_target
         target_remaining = max(0.0, (target or 0.0) - self.lap_deployed)
         can_deploy = target is None or target_remaining > 0.0
+        execution, mpc = self.execution.track_zone(
+            decision.lambda_kin, decision.lambda_b, 100.0,
+            decision.target_speed_kmh, self.ego.speed_kmh, self.ego.energy,
+            target,
+        )
+        self.last_mpc_result = mpc
+        mpc_fraction = execution.mpc_power_fraction or 0.0
         if decision.command == "BURN" and self.ego.energy > 5.0 and can_deploy:
-            ego_accel = cfg.ego_accel_kmh_s + cfg.burn_bonus_kmh_s
-            deployment = (min(cfg.battery_burn_per_s, target_remaining)
-                          if target is not None else cfg.battery_burn_per_s)
+            ego_accel = cfg.ego_accel_kmh_s + cfg.burn_bonus_kmh_s * mpc_fraction
+            deployment = (min(cfg.battery_burn_per_s * mpc_fraction, target_remaining)
+                          if target is not None else cfg.battery_burn_per_s * mpc_fraction)
             energy_delta = -deployment
             self.lap_deployed += deployment * cfg.dt_s
         elif decision.command == "HARVEST":

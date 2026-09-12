@@ -21,6 +21,14 @@ def test_different_actions_change_future_vehicle_state():
             conservative.ego.gap_s != aggressive.ego.gap_s)
 
 
+def test_closed_loop_applies_zone_mpc_output():
+    sim = ClosedLoopSimulator(HiddenRivalMode.DEPLETE)
+    sim.step()
+    assert sim.last_mpc_result is not None
+    assert sim.last_mpc_result.success
+    assert 0.0 <= sim.last_mpc_result.power_fraction <= 1.0
+
+
 def test_hidden_rival_policy_is_not_exposed_to_model():
     sim = ClosedLoopSimulator(HiddenRivalMode.CONSERVE)
     sim.step()
