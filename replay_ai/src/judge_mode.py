@@ -186,28 +186,36 @@ class JudgeModeModel:
         features = getattr(hmm, "features", None)
         if features is None:
             return ("Public telemetry evidence unavailable",)
+        # Each line names the public channel, the observation, and (via the
+        # panel) the belief it feeds, so the update is auditable end to end.
         evidence: list[str] = []
-        if features.throttle_clip > 0.0:
+        clip_seconds = float(getattr(features, "clip_seconds", 0.0) or 0.0)
+        if clip_seconds > 0.0:
+            evidence.append(f"THROTTLE super-clipping sustained {clip_seconds:.1f}s")
+        elif features.throttle_clip > 0.0:
             evidence.append(
-                f"Super-clipping persisted: {features.throttle_clip * 100:.0f}%"
+                "THROTTLE super-clipping on "
+                f"{features.throttle_clip * 100:.0f}% of full-throttle samples"
             )
         if features.dv_baseline < -0.5:
             evidence.append(
-                f"Speed {abs(features.dv_baseline):.1f} km/h below sector baseline"
+                f"SPEED {abs(features.dv_baseline):.0f} km/h below 5-lap baseline"
             )
         elif features.dv_baseline > 0.5:
             evidence.append(
-                f"Speed {features.dv_baseline:.1f} km/h above sector baseline"
+                f"SPEED {features.dv_baseline:.0f} km/h above 5-lap baseline"
             )
         if features.dgap > 0.02:
-            evidence.append(f"Gap closing response: {features.dgap:+.2f} s")
+            evidence.append(f"GAP closing {features.dgap:+.2f}s (rival slowing)")
         elif features.dgap < -0.02:
-            evidence.append(f"Rival opening response: {features.dgap:+.2f} s")
+            evidence.append(f"GAP opening {features.dgap:+.2f}s")
         if features.aero >= 0.5:
-            evidence.append("Active-aero / DRS proxy: ON")
+            evidence.append("AERO active (DRS proxy on)")
         if getattr(features, "tyre_life", 0.0) > 0.0:
-            evidence.append(f"Public tyre life: {features.tyre_life:.0f} laps")
-        return tuple(evidence or ("Public telemetry updated; evidence remains ambiguous",))
+            evidence.append(f"TYRE life {features.tyre_life:.0f} laps")
+        return tuple(
+            evidence or ("Public telemetry updated; evidence remains ambiguous",)
+        )
 
     @classmethod
     def from_report(cls, report: Any, gap_s: Optional[float] = None,
@@ -773,7 +781,9 @@ class JudgeModePanel:
         self._t("budget", budget, command_x, confidence_y - 43, 7, MUTED)
 
         # --- middle column: rival ERS capability belief ----------------------
-        belief_x = left + width * 0.38
+        # Starts clear of the left column so the alternatives/branch rail can
+        # right-align without touching the lowest belief row.
+        belief_x = left + width * 0.40
         self._t("belief_header", snapshot.rival_label, belief_x, content_top, 10,
                  MUTED, bold=True)
         # The verdict is the five-second read: is the rival sandbagging (a trap)
@@ -783,7 +793,11 @@ class JudgeModePanel:
         )
         self._t("belief_verdict", verdict, belief_x, content_top - 20, 8,
                  verdict_color, bold=True)
-        meter_width = max(90.0, min(180.0, width * 0.18))
+        # Size the meters from the gap to the evidence column so narrow windows
+        # never push a percentage into the "why" text.
+        why_x = left + width - max(240.0, width * 0.27)
+        middle_span = max(160.0, why_x - belief_x - 16.0)
+        meter_width = max(70.0, min(180.0, middle_span - 90.0))
         for index, mode in enumerate(snapshot.rival_modes):
             y = content_top - 40 - index * 20
             self._t(f"mode_label_{index}", mode.mode, belief_x, y, 9,
@@ -795,13 +809,12 @@ class JudgeModePanel:
                      meter_left + meter_width + 8, y, 9, TEXT, bold=True)
 
         # --- right column: the causal evidence -------------------------------
-        why_x = left + width - max(240.0, width * 0.27)
-        self._t("why_header", "WHY THIS CHANGED", why_x, content_top, 10,
+        self._t("why_header", "WHY THE MODEL CHANGED", why_x, content_top, 10,
                  MUTED, bold=True)
         for index, evidence in enumerate(snapshot.evidence[:3]):
-            self._t(f"evidence_{index}", f"• {evidence}", why_x,
+            self._t(f"evidence_{index}", f"✓ {evidence}", why_x,
                      content_top - 23 - index * 16, 7, TEXT)
-        self._t("why_footer", snapshot.explanation[:44], why_x,
+        self._t("why_footer", f"→ {snapshot.explanation[:40]}", why_x,
                  content_top - 74, 7, snapshot.command_color)
         layers = "  →  ".join(
             ("HMM40", "POMCP" if snapshot.search_particles else "SEARCH",
@@ -811,8 +824,9 @@ class JudgeModePanel:
                  content_top - 92, 7, ELECTRIC, bold=True)
 
         # --- alternatives, pinned above the footer so it can never collide ---
-        options_title_y = bottom + 64
-        option_rows = (bottom + 48, bottom + 34, bottom + 20)
+        options_title_y = bottom + 70
+        option_header_y = bottom + 58
+        option_rows = (bottom + 45, bottom + 32, bottom + 19)
         cw = col_left_w
         if branch is not None and getattr(branch, "outcomes", ()):
             self._t("alternatives", "COUNTERFACTUAL BRANCH",
@@ -849,23 +863,36 @@ class JudgeModePanel:
             )
             self._t("alternatives", search_title, command_x,
                      options_title_y, 9, MUTED, bold=True)
+            # Explicit units stop the solver's raw ranking from being read as
+            # the decision. "Energy cost" is signed: + spends, - recovers.
+            self._t("option_head_action", "ACTION", command_x,
+                     option_header_y, 6, MUTED, bold=True)
+            self._t("option_head_gain", "IMM. GAIN", command_x + cw * 0.30,
+                     option_header_y, 6, MUTED, bold=True)
+            self._t("option_head_energy", "ENERGY", command_x + cw * 0.52,
+                     option_header_y, 6, MUTED, bold=True)
+            self._t("option_head_later", "LATER", command_x + cw * 0.72,
+                     option_header_y, 6, MUTED, bold=True)
+            self._t("option_head_decision", "DECISION", command_x + cw,
+                     option_header_y, 6, MUTED, bold=True, anchor_x="right")
             for index, option in enumerate(snapshot.options[:3]):
                 y = option_rows[index]
                 color = snapshot.command_color if option.selected else MUTED
                 marker = "SELECTED" if option.selected else "REJECTED"
                 self._t(f"option_name_{index}", option.command, command_x, y, 8,
                          color, bold=option.selected)
-                self._t(f"option_status_{index}", marker,
-                         command_x + cw * 0.30, y, 7, color,
-                         bold=option.selected)
                 self._t(f"option_gain_{index}",
-                         f"gap {option.gap_gain_s:+.2f}s",
-                         command_x + cw * 0.45, y, 7, TEXT)
+                         f"{option.gap_gain_s:+.2f}s",
+                         command_x + cw * 0.30, y, 7, TEXT)
                 self._t(f"option_energy_{index}",
                          f"{option.energy_delta_eu:+.1f} EU",
-                         command_x + cw * 0.62, y, 7, MUTED)
-                self._t(f"option_score_{index}", f"score {option.score:+.2f}",
-                         command_x + cw, y, 7, color, anchor_x="right")
+                         command_x + cw * 0.52, y, 7, MUTED)
+                self._t(f"option_later_{index}",
+                         f"{option.continuation_value:+.2f}",
+                         command_x + cw * 0.72, y, 7, TEXT)
+                self._t(f"option_status_{index}", marker,
+                         command_x + cw, y, 7, color,
+                         bold=option.selected, anchor_x="right")
 
         footer_y = bottom + 9
         envelope = f"ENVELOPE {snapshot.envelope_status}"
@@ -1078,18 +1105,37 @@ class JudgeWalkthroughPanel:
         elif step_index == 3:
             self._t("proof_options_header", "POMCP ALTERNATIVES",
                      left + pad, top - 78, 9, MUTED, bold=True)
+            content_w = max(200.0, width - 2 * pad)
+            columns = (
+                (0.00, "ACTION", "left"),
+                (0.30, "IMM. GAIN", "left"),
+                (0.50, "ENERGY COST", "left"),
+                (0.70, "LATER VALUE", "left"),
+                (1.00, "DECISION", "right"),
+            )
+            for offset, label, anchor in columns:
+                self._t(f"proof_option_head_{label}", label,
+                         left + pad + content_w * offset, top - 100, 7,
+                         MUTED, bold=True, anchor_x=anchor)
             for index, option in enumerate(snapshot.options[:3]):
-                y = top - 105 - index * 28
+                y = top - 127 - index * 25
                 color = snapshot.command_color if option.selected else MUTED
                 marker = "SELECTED" if option.selected else "REJECTED"
                 self._t(f"proof_option_{index}", option.command, left + pad,
                          y, 9, color, bold=option.selected)
+                self._t(f"proof_option_gain_{index}",
+                         f"{option.gap_gain_s:+.2f}s",
+                         left + pad + content_w * 0.30, y, 8, TEXT)
+                self._t(f"proof_option_energy_{index}",
+                         f"{option.energy_delta_eu:+.1f} EU",
+                         left + pad + content_w * 0.50, y, 8, MUTED)
+                self._t(f"proof_option_later_{index}",
+                         f"{option.continuation_value:+.2f}",
+                         left + pad + content_w * 0.70, y, 8, TEXT)
                 self._t(f"proof_option_status_{index}", marker,
-                         left + pad + 112, y, 7, color, bold=option.selected)
-                self._t(f"proof_option_value_{index}",
-                         f"gap {option.gap_gain_s:+.2f}s  •  energy {option.energy_delta_eu:+.1f} EU",
-                         left + pad + 178, y, 7, TEXT)
-            self._t("proof_options_note", "DECISION UNITS, NOT RAW SOLVER SCORES",
+                         left + pad + content_w, y, 8, color,
+                         bold=option.selected, anchor_x="right")
+            self._t("proof_options_note", "UNITS, NOT RAW SOLVER SCORES",
                      left + pad, bottom + 22, 7, ELECTRIC, bold=True)
         else:
             self._t("proof_recommend_header", "RECOMMENDATION",

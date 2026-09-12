@@ -1643,6 +1643,7 @@ class F1RaceReplayWindow(arcade.Window):
                 sector=int(rival.get("sector", 0) or 0),
                 lap=int(rival.get("lap", lap) or lap),
                 tyre_life=float(rival.get("tyre_life", 0.0) or 0.0),
+                time_s=float(frame.get("t", 0.0) or 0.0),
             )
             pair_key = (focus_code, ahead)
             intelligence_key = (frame_idx, *pair_key)
