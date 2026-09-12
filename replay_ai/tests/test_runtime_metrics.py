@@ -11,3 +11,7 @@ def test_runtime_metrics_expose_soh_energy_and_solver_diagnostics():
     assert "battery_wear_cost" in metrics
     assert "scenario_values" in metrics
     assert "socp_feasible" in metrics
+    assert metrics["scenario_particles"] > 0
+    assert metrics["scenario_histories"] > 0
+    assert len(metrics["spatial_speed_profile"]) == 5
+    assert "kinetic_costates" in metrics

@@ -78,6 +78,9 @@ class Level2Plan:
     spatial_reference: SpatialReference | None = None
     spatial_feasible: bool = True
     spatial_residual: float = 0.0
+    search_particles: int = 0
+    search_histories: int = 0
+    search_risk_values: Mapping[str, float] | None = None
 
 
 class BoundedScenarioPlanner:
@@ -149,6 +152,7 @@ class BoundedScenarioPlanner:
             tuple(scored), envelope, search.values, spatial,
             spatial.envelope.feasible if spatial else True,
             spatial.envelope.max_residual if spatial else 0.0,
+            search.particle_count, search.history_count, search.risk_values,
         )
 
 
