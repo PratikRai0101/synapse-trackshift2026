@@ -3,3 +3,4 @@ scipy>=1.10
 cvxpy>=1.4
 clarabel>=0.6
 pytest>=7.0
+streamlit>=1.40

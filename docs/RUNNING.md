@@ -75,7 +75,30 @@ and the claim ledger.
 The view reads recorded runs and never recomputes a recommendation. A missing
 field renders as *unavailable*, not as zero.
 
-## 6. Run a batch and generate the numbers
+## 6. Run the Pit-Wall dashboard
+
+```sh
+.venv/bin/streamlit run app.py
+```
+
+Opens a browser dashboard with eight tabs:
+
+| Tab | Shows |
+|---|---|
+| L4 · Season | synthetic season DP value, replacements, marginal stress price |
+| L3 · Race | remaining-race value curves and the deploy target vs laps left |
+| L2 · Tactical | decision timeline, belief over rival policy, what was declined |
+| L1 · Execution | PMP switching cue with both costates, zone MPC solve |
+| B0 · Features | rolling-baseline gap deltas |
+| B5 · Simulation | gap, speed, deployment, energy, tyre temperature traces |
+| Batch results | frozen aggregates and the claim ledger |
+| Architecture status | what is implemented, partial or not implemented |
+
+Every panel is tagged `IMPLEMENTED`, `PARTIAL` or `NOT IMPLEMENTED`. Use the
+sidebar to pick the controller (including `m_hmm40`, the 40-state belief), the
+rival policy and the seed, then press **Run episode**.
+
+## 7. Run a batch and generate the numbers
 
 ```sh
 # development split, 10 seeds, the main controllers
@@ -100,7 +123,7 @@ field renders as *unavailable*, not as zero.
 
 Each batch takes about 60 s for 10 seeds x 5 policies x 5 controllers.
 
-## 7. Sweep a parameter
+## 8. Sweep a parameter
 
 The contact margin is the one to understand:
 
@@ -115,7 +138,7 @@ At `0.0` the held-out split produces contacts; at `0.15` it does not. That
 sensitivity is a result, not a bug: the method operates near the contact
 boundary.
 
-## 8. What the outputs mean
+## 9. What the outputs mean
 
 | Field | Meaning |
 |---|---|
@@ -127,11 +150,12 @@ boundary.
 | `completion_rate` | fraction of episodes that ran. Failures are retained, never dropped. |
 | `paired gap delta` | per-seed difference against the reference baseline. |
 
-## 9. Where things live
+## 10. Where things live
 
 | Want | Look at |
 |---|---|
-| The GUI | `artifacts/gridops_report.html` |
+| The dashboard | `.venv/bin/streamlit run app.py` |
+| The static report | `artifacts/gridops_report.html` |
 | The pitch | `docs/PITCH.md` |
 | The generated numbers | `artifacts/pitch_results.md`, `artifacts/pitch_bundle.json` |
 | What is built and what is not | `HANDOFF.md` |
@@ -139,7 +163,7 @@ boundary.
 | Submission checklist | `docs/SUBMISSION.md` |
 | The spec | `docs/development/` |
 
-## 10. A five-minute tour
+## 11. A five-minute tour
 
 ```sh
 .venv/bin/python -m pytest -q
