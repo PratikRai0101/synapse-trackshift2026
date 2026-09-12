@@ -104,6 +104,7 @@ def build_decision_input(
     config: EpisodeConfig,
     battery: BatteryParams,
     observations: list[ObservationFrame] | None = None,
+    opponent_speed_mps: float | None = None,
 ) -> DecisionInput:
     """Build the permitted input. Hidden rival state is deliberately absent."""
     return DecisionInput(
@@ -115,6 +116,7 @@ def build_decision_input(
         ego_battery_temp_k=ego.battery.temp_k,
         gap_m=rival_progress_m - ego.progress_m,
         laps_remaining=config.laps_remaining,
+        opponent_speed_mps=opponent_speed_mps,
         observations=list(observations or []),
         versions={"plant": "synthetic.v1", "belief": "particle.v1"},
     )
@@ -178,6 +180,7 @@ class EpisodeRunner:
         ego_control = Control(ActionFamily.REFERENCE, 0.0, cfg.initial_speed_mps, cfg.replan_interval_s)
         previous_gap: float | None = None
         previous_decision: Decision | None = None
+        previous_rival_speed: float = cfg.initial_speed_mps
         since_ego_attack_s = 0.0
 
         while t < cfg.duration_s:
@@ -191,11 +194,15 @@ class EpisodeRunner:
                         ActionFamily.ATTACK_LATER,
                     )
                     gained = gap_closed >= GAIN_THRESHOLD_M or (gap <= PASS_GAP_M < previous_gap)
-                    controller.notify_gap_change(gap_closed)
+                    controller.notify_observation(
+                        rival.state.speed_mps - previous_rival_speed
+                    )
                     controller.notify_commitment_outcome(attacked, gained)
+                    previous_rival_speed = rival.state.speed_mps
 
                 decision_input = build_decision_input(
-                    ego, rival.state.progress_m, t, cfg, self.battery, observations
+                    ego, rival.state.progress_m, t, cfg, self.battery, observations,
+                    opponent_speed_mps=rival.state.speed_mps,
                 )
                 decision = controller.decide(decision_input, cfg.decision_budget_s)
                 ego_control = Control(

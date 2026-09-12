@@ -32,9 +32,16 @@ from ..decision.commitment import (
 )
 from ..decision.pomcp import POMCP, SearchResult
 from ..decision.planning import ConditionalConvexPlanner, PlannerConfig
-from ..decision.tactical import SPEND_J, TacticalModel, TacticalParams, TacticalState
+from ..decision.tactical import (
+    ACTION_POWER_W,
+    ACTION_TARGET_SPEED_MPS,
+    SPEND_J,
+    TacticalModel,
+    TacticalParams,
+    TacticalState,
+)
 from ..race_value.lap_map import TerminalValue
-from ..simulation.rivals import RivalPolicy
+from ..simulation.rivals import RivalPolicy, RivalPolicyConfig, rival_target_speed
 
 
 @dataclass
@@ -54,21 +61,13 @@ class Decision:
 class Controller(Protocol):
     def decide(self, decision_input: DecisionInput, budget_s: float) -> Decision: ...
 
-    def notify_gap_change(self, gap_closed_m: float) -> None: ...
+    def notify_observation(self, rival_speed_mps: float) -> None: ...
 
     def notify_commitment_outcome(self, attacked: bool, gained: bool) -> None: ...
 
 
 def _power_for_family(family: ActionFamily, params: TacticalParams) -> float:
-    if family is ActionFamily.REFERENCE:
-        return 0.0
-    if family is ActionFamily.CONSERVE:
-        return 15_000.0
-    if family is ActionFamily.DEFEND:
-        return 120_000.0
-    if family is ActionFamily.PROBE:
-        return 50_000.0
-    return 150_000.0
+    return ACTION_POWER_W.get(family, 0.0)
 
 
 def _target_lateral(family: ActionFamily) -> float:
@@ -84,16 +83,7 @@ def _target_lateral(family: ActionFamily) -> float:
 
 def _target_speed(family: ActionFamily, current_speed: float) -> float:
     """Reference-paced target; the plant applies the cornering-speed cap."""
-    base = 80.0
-    if family is ActionFamily.CONSERVE:
-        return base - 6.0
-    if family is ActionFamily.PROBE:
-        return base + 4.0
-    if family in (ActionFamily.ATTACK_NOW, ActionFamily.ATTACK_LATER):
-        return base + 6.0
-    if family is ActionFamily.DEFEND:
-        return base + 4.0
-    return base
+    return ACTION_TARGET_SPEED_MPS.get(family, 80.0)
 
 
 class ReferenceController:
@@ -106,7 +96,7 @@ class ReferenceController:
             reason_codes=["BASELINE"],
         )
 
-    def notify_gap_change(self, gap_closed_m: float) -> None:
+    def notify_observation(self, rival_speed_mps: float) -> None:
         return None
 
     def notify_commitment_outcome(self, attacked: bool, gained: bool) -> None:
@@ -119,6 +109,7 @@ def _hypothesis_costs(
     policies: Sequence[RivalPolicy],
     terminal_value: TerminalValue,
     params: TacticalParams,
+    closure_fn=None,
 ) -> dict[ActionFamily, list[float]]:
     """Cost of each family under each rival-policy hypothesis (deterministic)."""
     out: dict[ActionFamily, list[float]] = {}
@@ -128,7 +119,7 @@ def _hypothesis_costs(
         costs: list[float] = []
         spend = SPEND_J.get(family, 0.0)
         for policy in policies:
-            closure = _expected_closure(family, policy)
+            closure = _expected_closure(family, policy, closure_fn)
             residual_gap = max(0.0, gap - closure)
             costs.append(
                 terminal_value.cost_s(max(0.0, energy - spend))
@@ -138,7 +129,11 @@ def _hypothesis_costs(
     return out
 
 
-def _expected_closure(family: ActionFamily, policy: RivalPolicy) -> float:
+def _expected_closure(
+    family: ActionFamily, policy: RivalPolicy, closure_fn=None
+) -> float:
+    if closure_fn is not None:
+        return float(closure_fn(family, policy))
     from ..decision.tactical import _CLOSE_DEFENSIVE, _CLOSE_WEAK
 
     table = _CLOSE_DEFENSIVE if policy in {
@@ -169,7 +164,7 @@ class StationaryPlanner:
         )
         return _decision_from_search(result, decision_input, time.perf_counter() - start)
 
-    def notify_gap_change(self, gap_closed_m: float) -> None:
+    def notify_observation(self, rival_speed_mps: float) -> None:
         return None
 
     def notify_commitment_outcome(self, attacked: bool, gained: bool) -> None:
@@ -214,7 +209,7 @@ class PosteriorMeanPlanner:
             lateral_target_m=_target_lateral(best),
         )
 
-    def notify_gap_change(self, gap_closed_m: float) -> None:
+    def notify_observation(self, rival_speed_mps: float) -> None:
         return None
 
     def notify_commitment_outcome(self, attacked: bool, gained: bool) -> None:
@@ -269,7 +264,7 @@ class ConvexPlannerController:
             runtime_s=time.perf_counter() - start,
         )
 
-    def notify_gap_change(self, gap_closed_m: float) -> None:
+    def notify_observation(self, rival_speed_mps: float) -> None:
         return None
 
     def notify_commitment_outcome(self, attacked: bool, gained: bool) -> None:
@@ -291,6 +286,9 @@ class AmbiguityAwareController:
         ambiguity_threshold: float = 0.6,
         probe_cooldown_s: float = 4.0,
         planner: ConditionalConvexPlanner | None = None,
+        closure_fn=None,
+        response_fn=None,
+        rival_config=None,
         seed: int = 0,
     ) -> None:
         self.terminal_value = terminal_value
@@ -303,6 +301,9 @@ class AmbiguityAwareController:
         self.ambiguity_threshold = ambiguity_threshold
         self.probe_cooldown_s = probe_cooldown_s
         self.planner = planner
+        self.closure_fn = closure_fn
+        self.response_fn = response_fn
+        self.rival_config = rival_config or RivalPolicyConfig()
         self.rng = random.Random(seed)
         self.reserve_guard = ReserveGuard(terminal_value.reserve)
         self.no_progress = NoProgressGuard(repeat_threshold=4, cooldown_s=3.0)
@@ -337,7 +338,7 @@ class AmbiguityAwareController:
             )
             for p in particles
         ]
-        model = TacticalModel(self.terminal_value, self.horizon)
+        model = TacticalModel(self.terminal_value, self.horizon, closure_fn=self.closure_fn)
         result = POMCP(model, self.horizon, self.iterations).search(
             states, self.rng, deadline_s=budget_s
         )
@@ -347,7 +348,7 @@ class AmbiguityAwareController:
         policies = [p.policy for p in particles]
         costs = _hypothesis_costs(
             decision_input, [ActionFamily.REFERENCE, best], policies, self.terminal_value,
-            model.params,
+            model.params, self.closure_fn,
         )
         improvement = conservative_improvement(
             costs[ActionFamily.REFERENCE], costs[best], self.error_allowance_s
@@ -481,12 +482,20 @@ class AmbiguityAwareController:
         )
 
     # -- causal feedback ---------------------------------------------------
-    def notify_gap_change(self, gap_closed_m: float) -> None:
-        expected = {
-            policy: _expected_closure(self.last_family, policy)
-            for policy in {p.policy for p in self.belief.particles}
-        }
-        self.belief.update_on_observation(gap_closed_m, expected)
+    def notify_observation(self, rival_speed_mps: float) -> None:
+        """Update the belief from the rival's public speed response."""
+        policies = {p.policy for p in self.belief.particles}
+        if self.response_fn is not None:
+            expected = {p: self.response_fn(self.last_family, p) for p in policies}
+        else:
+            config = self.rival_config
+            expected = {
+                p: rival_target_speed(
+                    p, self.last_family, 0.0, config.reaction_delay_s, config
+                )
+                for p in policies
+            }
+        self.belief.update_on_observation(rival_speed_mps, expected)
         self.belief.mix_for_non_stationarity()
 
     def notify_commitment_outcome(self, attacked: bool, gained: bool) -> None:

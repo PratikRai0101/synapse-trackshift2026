@@ -12,17 +12,20 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from typing import Hashable, Sequence
+from typing import Callable, Hashable, Sequence
 
 from ..contracts.state import ActionFamily
 from ..race_value.lap_map import TerminalValue
 from ..simulation.rivals import RivalPolicy
 
 
+#: Tactical action set searched by POMCP. ``ATTACK_LATER`` is deliberately not a
+#: member: a one-step-per-decision surrogate cannot represent a deferred benefit,
+#: so deferral is expressed as choosing the reference at this cycle and attacking
+#: at a later one.
 FAMILIES: tuple[ActionFamily, ...] = (
     ActionFamily.REFERENCE,
     ActionFamily.ATTACK_NOW,
-    ActionFamily.ATTACK_LATER,
     ActionFamily.DEFEND,
     ActionFamily.CONSERVE,
     ActionFamily.PROBE,
@@ -40,6 +43,26 @@ SPEND_J: dict[ActionFamily, float] = {
     ActionFamily.DEFEND: 150_000.0,
     ActionFamily.CONSERVE: 0.0,
     ActionFamily.PROBE: 50_000.0,
+}
+
+#: Canonical action definitions, shared by controllers and calibration so the
+#: two cannot drift apart.
+ACTION_TARGET_SPEED_MPS: dict[ActionFamily, float] = {
+    ActionFamily.REFERENCE: 80.0,
+    ActionFamily.CONSERVE: 74.0,
+    ActionFamily.DEFEND: 84.0,
+    ActionFamily.PROBE: 84.0,
+    ActionFamily.ATTACK_NOW: 86.0,
+    ActionFamily.ATTACK_LATER: 86.0,
+}
+
+ACTION_POWER_W: dict[ActionFamily, float] = {
+    ActionFamily.REFERENCE: 0.0,
+    ActionFamily.CONSERVE: 15_000.0,
+    ActionFamily.DEFEND: 120_000.0,
+    ActionFamily.PROBE: 50_000.0,
+    ActionFamily.ATTACK_NOW: 150_000.0,
+    ActionFamily.ATTACK_LATER: 120_000.0,
 }
 
 #: Gap closure in metres against a weak rival / against a defensive rival.
@@ -71,7 +94,7 @@ class TacticalState:
 
 @dataclass(frozen=True)
 class TacticalParams:
-    gap_price_s_per_m: float = 0.02
+    gap_price_s_per_m: float = 0.05
     noise_m: float = 1.5
     pass_gap_m: float = 0.0
 
@@ -87,10 +110,14 @@ class TacticalModel:
         terminal_value: TerminalValue,
         horizon: int,
         params: TacticalParams | None = None,
+        closure_fn: Callable[[ActionFamily, RivalPolicy], float] | None = None,
     ) -> None:
         self.terminal_value = terminal_value
         self.horizon = horizon
         self.params = params or TacticalParams()
+        #: Optional calibrated closure model. When absent the declared tables
+        #: below are used; the two are interchangeable by design.
+        self.closure_fn = closure_fn
 
     def actions(self, state: TacticalState) -> Sequence[ActionFamily]:
         return FAMILIES
@@ -120,5 +147,7 @@ class TacticalModel:
         return observation
 
     def _closure(self, action: ActionFamily, policy: RivalPolicy) -> float:
+        if self.closure_fn is not None:
+            return float(self.closure_fn(action, policy))
         table = _CLOSE_DEFENSIVE if policy in _DEFENSIVE else _CLOSE_WEAK
         return table.get(action, 0.0)
