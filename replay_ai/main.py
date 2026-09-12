@@ -45,6 +45,33 @@ def _example_lap_from_cached_frames(race_telemetry):
     last_distance = distance
   return pd.DataFrame(rows) if len(rows) >= 2 else None
 
+def _rotation_from_cached_geometry(example_lap):
+  """Orient cached geometry from its start/finish straight.
+
+  FastF1's display convention points the opening straight to the left. When
+  circuit metadata is unavailable, the first 400 m provides the same stable
+  orientation without a circuit-specific hard-coded angle.
+  """
+  import math
+  import numpy as np
+
+  if example_lap is None or not {"X", "Y", "Distance"}.issubset(example_lap):
+    return 0.0
+  points = example_lap[["X", "Y", "Distance"]].dropna().sort_values("Distance")
+  if len(points) < 2:
+    return 0.0
+  start_distance = float(points["Distance"].iloc[0])
+  opening = points[points["Distance"] <= start_distance + 400.0]
+  if len(opening) < 2:
+    opening = points.iloc[:min(20, len(points))]
+  dx = float(opening["X"].iloc[-1] - opening["X"].iloc[0])
+  dy = float(opening["Y"].iloc[-1] - opening["Y"].iloc[0])
+  if not np.isfinite(dx) or not np.isfinite(dy) or math.hypot(dx, dy) < 1e-6:
+    return 0.0
+  rotation = 180.0 - math.degrees(math.atan2(dy, dx))
+  return (rotation + 180.0) % 360.0 - 180.0
+
+
 def main(year=None, round_number=None, playback_speed=1, session_type='R', visible_hud=True, ready_file=None, show_telemetry_viewer=True):
   print(f"Loading F1 {year} Round {round_number} Session '{session_type}'")
   session = load_session(year, round_number, session_type)
@@ -120,8 +147,11 @@ def main(year=None, round_number=None, playback_speed=1, session_type='R', visib
     try:
       circuit_rotation = get_circuit_rotation(session)
     except Exception as exc:
-      circuit_rotation = 0.0
-      print(f"Circuit metadata unavailable; using cached orientation: {exc}")
+      circuit_rotation = _rotation_from_cached_geometry(example_lap)
+      print(
+        f"Circuit metadata unavailable; inferred cached orientation "
+        f"({circuit_rotation:.1f}°): {exc}"
+      )
     
     # Prepare session info for display banner
     session_info = {

@@ -1,4 +1,102 @@
+from types import SimpleNamespace
+
 from src.interfaces.race_replay import F1RaceReplayWindow
+from src.judge_mode import (
+    BranchStart,
+    JudgeModeController,
+    JudgeModePanel,
+    build_bookmarks,
+)
+
+
+def test_judge_panel_reservation_keeps_track_above_panel():
+    window = SimpleNamespace(
+        width=1280,
+        height=720,
+        left_ui_margin=340,
+        right_ui_margin=260,
+        top_ui_reserved=96,
+        selected_drivers=["VER"],
+        selected_driver="VER",
+        judge_panel=JudgeModePanel(),
+        judge_mode_controller=JudgeModeController(enabled=True),
+    )
+
+    panel = window.judge_panel.layout_bounds(1280, 720, 340, 260)
+    reserve = F1RaceReplayWindow._required_bottom_ui_reserve(window)
+
+    assert panel.top < reserve
+    assert reserve < window.height - window.top_ui_reserved
+
+
+def test_track_reclaims_original_space_without_a_focus_driver():
+    window = SimpleNamespace(
+        selected_drivers=[], selected_driver=None,
+        judge_mode_controller=JudgeModeController(enabled=True),
+    )
+    assert F1RaceReplayWindow._required_bottom_ui_reserve(window) == 300.0
+
+
+def test_judge_bookmark_seek_is_observational_and_resets_inference(monkeypatch):
+    window = object.__new__(F1RaceReplayWindow)
+    frames = [{"t": 0.0}, {"t": 1.0}, {"t": 2.0}, {"t": 3.0}]
+    window.frames = frames
+    window.n_frames = len(frames)
+    window.frame_index = 0.0
+    window.paused = False
+    window.judge_bookmarks = build_bookmarks(len(frames), 1)
+    window.judge_mode_controller = JudgeModeController(
+        enabled=True, bookmarks=window.judge_bookmarks
+    )
+    window._intelligence_models = {"pair": object()}
+    window._intelligence_cache = {"frame": object()}
+    window._last_intelligence_key = "frame"
+    window._last_tactical = object()
+    window._last_rival_hmm = object()
+    window._last_lap_plan = object()
+    window._last_runtime_metrics = {"stale": True}
+    window._counterfactual_branch = object()
+    window._counterfactual_status = None
+    window._broadcast_telemetry_state = lambda: None
+
+    original_frames = list(window.frames)
+    window._select_judge_bookmark(3)
+
+    assert window.frame_index == window.judge_bookmarks[3].frame_index
+    assert window.paused is True
+    assert window.frames == original_frames
+    assert window._intelligence_models == {}
+    assert window._intelligence_cache == {}
+    assert window._counterfactual_branch is None
+
+
+def test_counterfactual_launch_uses_branch_without_touching_frames(monkeypatch):
+    window = object.__new__(F1RaceReplayWindow)
+    frames = [{"t": 0.0, "drivers": {"EGO": {"speed": 300.0}}}]
+    window.frames = frames
+    window._focus_report = type("Report", (), {
+        "branch_start": BranchStart(
+            frame_index=0, timestamp_s=0.0, driver="EGO", rival="RIV",
+            own_speed_kmh=300.0, rival_speed_kmh=299.0, gap_s=0.7,
+            own_energy=60.0,
+        )
+    })()
+    window._counterfactual_running = False
+    window._counterfactual_branch = None
+    window._counterfactual_status = None
+    window.paused = False
+    sentinel = object()
+    monkeypatch.setattr(
+        "src.interfaces.race_replay.run_counterfactual",
+        lambda start, steps, seed: sentinel,
+    )
+
+    original_frames = list(window.frames)
+    window._launch_counterfactual()
+
+    assert window._counterfactual_branch is sentinel
+    assert window.paused is True
+    assert window.frames == original_frames
 
 
 def test_battle_group_single_selection_middle():

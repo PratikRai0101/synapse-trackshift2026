@@ -1078,6 +1078,9 @@ class ControlsPopupComponent(BaseComponent):
             ("B", "Toggle Progress Bar"),
             ("L", "Toggle Driver Labels"),
             ("F", "Toggle Focus / Battle mode"),
+            ("J", "Judge / Engineer view"),
+            ("5-0", "Scenario bookmarks; N/P next/previous"),
+            ("C", "Counterfactual action branches"),
             ("H", "Toggle Help Popup"),
         ]
 

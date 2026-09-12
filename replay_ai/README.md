@@ -35,6 +35,8 @@ calibration and measured synthetic results.
 - **Interactive Controls:** Pause, rewind, fast forward, and adjust playback speed using on-screen buttons or keyboard shortcuts.
 - **Legend:** On-screen legend explains all controls.
 - **Driver Telemetry Insights:** View speed, gear, DRS status, and current lap for selected drivers when selected on the leaderboard.
+- **Judge Mode:** A decision-first panel shows the tactical command, public-telemetry evidence, four ERS capability-belief probabilities, explicit units/provenance, and rejected alternatives; checked-in artifacts are labelled synthetic.
+- **Counterfactual branches:** Press **C** to run isolated action branches from the current public state; the recorded replay is observational and is never mutated.
 
 ## Controls
 
@@ -48,6 +50,21 @@ calibration and measured synthetic results.
 - **Toggle Driver Names**: **L** to hide/show driver names on track
 - **Select driver/drivers**: Click to select driver or shift click to select multiple drivers
 - **Focus / Battle mode**: **F** to toggle highlight of selected driver + 2 cars ahead/behind with gap connectors
+- **Judge Mode:** **J** toggles the judge panel and the original Race Engineer HUD.
+- **Scenario bookmarks:** **5–0** jump to deterministic demo moments; **N/P** move to the next/previous moment.
+- **Counterfactual branch:** **C** pauses and compares BURN, HARVEST, and PROACTIVE TRAP in a separate simulation.
+- **Default view override:** set `F1_JUDGE_MODE=0` to start in the original Race Engineer HUD; Judge Mode is still available with **J**.
+
+### Judge Mode quick start
+
+1. Click one driver in the leaderboard. That driver becomes the focus car; the car immediately ahead becomes the inferred rival.
+2. Read **Recommendation** first. `ATTACK NOW`, `PROTECT RESERVE`, or `PROBE / TRAP` is the current tactical command.
+3. Read **ERS Capability Belief** as probabilities inferred from public speed, throttle, brake, gap, and DRS/aero-proxy data. They are **not rival battery SOC**.
+4. Use **5–0** for fixed demo moments, or **N/P** to move through them. A bookmark pauses recorded playback.
+5. Press **C** to compare all three actions in an isolated counterfactual simulation. Press SPACE to resume the recorded replay; resuming clears the branch result.
+6. Press **J** to compare Judge Mode with the original detailed Race Engineer HUD. Press **F** to toggle the nearby battle-car highlighting and **H** for in-app controls.
+
+`EU` means normalized, estimated energy units. Checked-in HMM and lap-map artifacts are synthetic development artifacts; the panel labels them accordingly.
 
 
 ## Safety Car

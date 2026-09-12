@@ -124,8 +124,8 @@ class BoundedScenarioPlanner:
             scored.append(ScenarioAction(command, cost, gap_gain, belief_value,
                                          score))
         selected = max(scored, key=lambda action: action.score)
-        search = self.searcher.search(hmm, gap_s, energy)
-        search_allowed = self.use_search and (
+        search = self.searcher.search(hmm, gap_s, energy) if self.use_search else None
+        search_allowed = search is not None and (
             (search.action != "BURN" or p[ERSMode.DERATE.value] >= 0.40) and
             (search.action != "HARVEST" or p[ERSMode.HARVEST.value] >= 0.40 or energy < 30.0)
         )
@@ -149,10 +149,12 @@ class BoundedScenarioPlanner:
         lambda_b = max(0.01, (100.0 - energy) / 100.0 + max(0.0, wear_cost))
         return Level2Plan(
             selected.command, reference, lambda_kin, lambda_b,
-            tuple(scored), envelope, search.values, spatial,
+            tuple(scored), envelope, search.values if search else None, spatial,
             spatial.envelope.feasible if spatial else True,
             spatial.envelope.max_residual if spatial else 0.0,
-            search.particle_count, search.history_count, search.risk_values,
+            search.particle_count if search else 0,
+            search.history_count if search else 0,
+            search.risk_values if search else None,
         )
 
 

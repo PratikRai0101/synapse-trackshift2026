@@ -399,10 +399,13 @@ class MotorsportIntelligence:
             "socp_residual": (spatial.envelope.max_residual if spatial else
                               (getattr(envelope, "max_residual", None)
                                if envelope else None)),
-            "scenario_values": (dict(self.last_level2.search_values)
+            "scenario_values": (dict(self.last_level2.search_values or {})
                                  if self.last_level2 else {}),
             "scenario_risk_values": (dict(self.last_level2.search_risk_values or {})
                                      if self.last_level2 else {}),
+            "tactical_action_scores": [
+                action.__dict__ for action in self.last_level2.action_scores
+            ] if self.last_level2 else [],
             "scenario_particles": (self.last_level2.search_particles
                                     if self.last_level2 else 0),
             "scenario_histories": (self.last_level2.search_histories
