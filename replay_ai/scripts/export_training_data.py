@@ -17,9 +17,10 @@ from src.intelligence.telemetry_adapter import PublicTelemetryAdapter
 
 
 def export_frames(
-    frames: Iterable[Mapping], driver: str, rival: str, output, stride: int = 25
+    frames: Iterable[Mapping], driver: str, rival: str, output, stride: int = 25,
+    track_length_m: float | None = None
 ) -> int:
-    adapter = PublicTelemetryAdapter(source="fastf1-replay")
+    adapter = PublicTelemetryAdapter(source="fastf1-replay", track_length_m=track_length_m)
     written = 0
     last_lap = None
     for index, frame in enumerate(frames):
@@ -51,13 +52,16 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--stride", type=int, default=25,
                         help="sample every N replay frames (default: 25)")
+    parser.add_argument("--track-length-m", type=float, default=None,
+                        help="track length for estimating gaps when absent")
     args = parser.parse_args()
     with args.pickle_path.open("rb") as source:
         data = pickle.load(source)
     frames = data.get("frames", data) if isinstance(data, dict) else data
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w") as destination:
-        count = export_frames(frames, args.driver, args.rival, destination, args.stride)
+        count = export_frames(frames, args.driver, args.rival, destination,
+                               args.stride, args.track_length_m)
     print(f"exported {count} public records to {args.output}")
 
 
