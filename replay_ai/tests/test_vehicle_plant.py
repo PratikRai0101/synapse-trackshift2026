@@ -16,12 +16,22 @@ def test_plant_updates_energy_temperature_wear_and_distance():
     assert step.battery_temperature >= 70
     assert step.tyre_wear > 0
     assert plant.state.fuel_mass_kg < 100
+    assert step.battery_resistance >= 1.0
 
 
 def test_regeneration_increases_energy_when_not_deploying():
     plant = VehiclePlant(PlantState(energy=50))
     step = plant.step(0.0, 1.0, regen_fraction=1.0)
     assert step.energy > 50
+
+
+def test_hot_battery_increases_resistance_and_reduces_power_acceleration():
+    cool = VehiclePlant(PlantState(battery_temperature=70.0))
+    hot = VehiclePlant(PlantState(battery_temperature=110.0))
+    cool_step = cool.step(1.0, 0.1)
+    hot_step = hot.step(1.0, 0.1)
+    assert hot_step.battery_resistance > cool_step.battery_resistance
+    assert hot_step.longitudinal_accel < cool_step.longitudinal_accel
 
 
 def test_slipstream_reduces_drag_and_pit_resets_wear_and_fuel():

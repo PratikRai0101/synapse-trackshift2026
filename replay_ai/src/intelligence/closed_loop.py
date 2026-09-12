@@ -162,7 +162,9 @@ class ClosedLoopSimulator:
         self.ego.energy = plant_step.energy
         self.battery_temperature = plant_step.battery_temperature
         throughput = abs(plant_step.energy - previous_energy)
-        self.battery_soh = max(0.60, self.battery_soh - throughput * 0.00005)
+        thermal_stress = max(0.0, self.battery_temperature - 70.0) / 30.0
+        fade = throughput * (0.00005 + 0.00003 * thermal_stress)
+        self.battery_soh = max(0.60, self.battery_soh - fade)
 
         self.rival_defending = self.ego.gap_s < 1.0
         defense_bonus = 4.0 if self.rival_defending else 0.0

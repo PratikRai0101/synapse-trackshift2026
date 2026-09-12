@@ -181,7 +181,9 @@ components that are dormant in the nominal plant.
 
 It reports mean, sample standard deviation, 95% confidence intervals, energy
 use, gap and completion rate. Rows are paired by seed and rival mode; failures
-remain in the report rather than being dropped.
+remain in the report rather than being dropped. The plant also applies
+temperature-dependent battery resistance and thermal SOH fade, so longer
+multi-lap runs can exercise lifecycle-aware ablations.
 
 ### Why scale calibration was required
 
