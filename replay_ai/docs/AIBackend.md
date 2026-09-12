@@ -160,6 +160,20 @@ That is the confusion that causes the controller to attack a car that is
 deliberately saving energy. It is rare; the residual error sits on the
 `H`/`M` boundary, which only misprices energy rather than inverting the decision.
 
+## Paired benchmark matrix
+
+Run the multi-seed comparison with identical initial conditions:
+
+```sh
+.venv/bin/python scripts/benchmark_matrix.py \
+  --seeds 10 --steps 100 --output artifacts/paired-benchmark.json
+```
+
+The matrix compares the full Level 1 path against `no_mpc` over all hidden
+rival modes and reports mean, sample standard deviation, 95% confidence
+intervals, energy use, gap and completion rate. Rows are paired by seed and
+rival mode; failures remain in the report rather than being dropped.
+
 ### Why scale calibration was required
 
 The first version fitted emission *means* but kept a hard-coded `sigma=1.0`. With
