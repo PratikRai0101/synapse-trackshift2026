@@ -134,6 +134,8 @@ class ClosedLoopSimulator:
             power_fraction, cfg.dt_s, curvature,
             regen_fraction=regen_fraction,
             slipstream_gap_s=self.ego.gap_s,
+            dirty_air_gap_s=self.ego.gap_s,
+            ahead_active_aero=1.0,
         )
         self.ego.speed_kmh = plant_step.speed_kmh
         self.ego.energy = plant_step.energy

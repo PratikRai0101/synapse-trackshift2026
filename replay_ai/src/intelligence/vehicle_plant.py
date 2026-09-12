@@ -4,6 +4,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from .race_physics import DirtyAirModel
+
 
 @dataclass(frozen=True)
 class PlantConfig:
@@ -58,6 +60,7 @@ class VehiclePlant:
                  config: PlantConfig | None = None) -> None:
         self.state = state or PlantState()
         self.config = config or PlantConfig()
+        self.dirty_air = DirtyAirModel()
 
     def pit_stop(self, new_tyre_temperature: float = 85.0) -> None:
         """Apply a pit-stop event: replace tyres and restore fuel mass."""
@@ -71,7 +74,9 @@ class VehiclePlant:
 
     def step(self, power_fraction: float, dt_s: float, curvature: float = 0.0,
              brake_fraction: float = 0.0, regen_fraction: float = 0.0,
-             slipstream_gap_s: float | None = None) -> PlantStep:
+             slipstream_gap_s: float | None = None,
+             dirty_air_gap_s: float | None = None,
+             ahead_active_aero: float = 1.0) -> PlantStep:
         cfg = self.config
         state = self.state
         dt = max(0.0, float(dt_s))
@@ -83,7 +88,10 @@ class VehiclePlant:
         drag = cfg.drag_accel
         if slipstream_gap_s is not None and slipstream_gap_s <= 1.0:
             drag *= max(0.0, 1.0 - cfg.slipstream_drag_reduction)
-        grip = cfg.tyre_mu * cfg.gravity * max(0.35, 1.0 - 0.35 * state.tyre_wear)
+        dirty_multiplier = (self.dirty_air.grip_multiplier(dirty_air_gap_s, ahead_active_aero)
+                            if dirty_air_gap_s is not None else 1.0)
+        grip = (cfg.tyre_mu * cfg.gravity * dirty_multiplier *
+                max(0.35, 1.0 - 0.35 * state.tyre_wear))
         if abs(float(curvature)) > 1e-9:
             speed_ms = min(speed_ms, math.sqrt(grip / abs(float(curvature))))
         lateral = speed_ms * speed_ms * abs(float(curvature))
