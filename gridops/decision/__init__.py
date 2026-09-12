@@ -18,7 +18,11 @@ from .commitment import (
 from .pomcp import POMCP, GenerativeModel, SearchResult
 from .planning import ConditionalConvexPlanner, ConvexPlan, PlannerConfig
 from .hmm_belief import HMMBelief, HMMConfig
+from .hmm40 import HMMBelief40, HMM40Config, MODES, N_STATES
 from .safety import ContactGuard
+from .features import CausalFeatures, RollingBaseline, TelemetrySample
+from .pmp import CostateState, GuidancePlan, guidance, switching_cue
+from .zone_mpc import EnergyZone, ZoneMPC, ZonePlan
 
 __all__ = [
     "REASON_COOLDOWN",
@@ -42,5 +46,19 @@ __all__ = [
     "PlannerConfig",
     "HMMBelief",
     "HMMConfig",
+    "HMMBelief40",
+    "HMM40Config",
+    "MODES",
+    "N_STATES",
     "ContactGuard",
+    "CausalFeatures",
+    "RollingBaseline",
+    "TelemetrySample",
+    "CostateState",
+    "GuidancePlan",
+    "guidance",
+    "switching_cue",
+    "EnergyZone",
+    "ZoneMPC",
+    "ZonePlan",
 ]

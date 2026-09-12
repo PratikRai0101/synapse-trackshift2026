@@ -62,6 +62,8 @@ class PlantStep:
     grip_violation_n: float
     saturation: tuple[SaturationReason, ...] = ()
     rule_reason: str | None = None
+    throttle: float = 0.0
+    brake: float = 0.0
     notes: tuple[str, ...] = ()
 
 
@@ -198,6 +200,8 @@ class Plant:
             grip_violation_n=violation,
             saturation=tuple(dict.fromkeys(reasons)),
             rule_reason=rule_reason,
+            throttle=min(1.0, max(0.0, f_engine / max(1.0, self.vehicle.max_engine_force_n))),
+            brake=min(1.0, max(0.0, f_brake / max(1.0, self.vehicle.max_brake_force_n))),
         )
 
     def _deployment_force(self, p_mech_w: float, speed_mps: float) -> float:
