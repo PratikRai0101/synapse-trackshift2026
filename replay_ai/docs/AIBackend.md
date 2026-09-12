@@ -129,9 +129,13 @@ Fitting a pooled within-mode standard deviation per feature
    represent that.
 4. **`_expected()` means are priors, partly hand-set.** Only the ERS-derived
    entries are currently fitted; the override contribution is still a constant.
-5. **Levels 3, 2 and 1 are not implemented.** There is no neural lap-time map, no
-   convex performance envelope, no scenario search and no ECU-level controller.
-   The tactical command is a rule over the ERS belief, not a solved optimum.
+5. **Level 3 is currently a transparent baseline, not a neural model.**
+   `lap_strategy.py` provides a fitted empirical lap-time map and finite-horizon
+   battery allocation DP. It is not yet trained from a multi-race lap dataset
+   and is not yet wired into the live dashboard. Levels 2 and 1 remain
+   unimplemented: there is no convex performance envelope, scenario search or
+   ECU-level controller. The tactical command is still a rule over the ERS
+   belief, not a solved optimum.
 6. **The season SOH model is a reference stub.** It is a small finite-horizon DP
    with indicative constants, not a validated degradation model.
 7. **No closed loop.** Rival actions do not react to ego actions; the model is
