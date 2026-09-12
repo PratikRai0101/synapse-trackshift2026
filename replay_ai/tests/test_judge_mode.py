@@ -12,6 +12,7 @@ from src.judge_mode import (
     JudgeWalkthroughPanel,
     build_bookmarks,
     build_walkthrough_steps,
+    describe_capability_belief,
     run_counterfactual,
     scenario_label_from_session,
 )
@@ -88,6 +89,23 @@ def test_judge_snapshot_uses_explicit_uncertainty_for_trap():
     assert 0.0 <= snapshot.confidence <= 1.0
     assert snapshot.command_color_name == "AMBER"
     assert snapshot.envelope_status == "FEASIBLE"
+
+
+def test_capability_belief_separates_sandbagging_from_depletion():
+    depleted, depleted_color = describe_capability_belief(
+        {"H": 0.05, "M": 0.12, "Lharvest": 0.11, "Lderate": 0.72}
+    )
+    saving, saving_color = describe_capability_belief(
+        {"H": 0.08, "M": 0.14, "Lharvest": 0.68, "Lderate": 0.10}
+    )
+    unresolved, unresolved_color = describe_capability_belief(
+        {"H": 0.50, "M": 0.25, "Lharvest": 0.01, "Lderate": 0.24}
+    )
+
+    assert "DEPLETED" in depleted
+    assert "SAVING" in saving
+    assert "UNRESOLVED" in unresolved
+    assert len({depleted_color, saving_color, unresolved_color}) == 3
 
 
 def test_bookmarks_are_unique_bounded_and_numbered():

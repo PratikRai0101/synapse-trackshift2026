@@ -62,6 +62,29 @@ MODE_DESCRIPTIONS = {
 }
 BOOKMARK_HOTKEYS = ("5", "6", "7", "8", "9", "0")
 
+# A marginal above this is treated as the dominant explanation for the rival's
+# pace. Four modes split the mass, so 0.40 is already a strong signal.
+_BELIEF_DOMINANCE = 0.40
+
+
+def describe_capability_belief(
+    probabilities: Mapping[str, float],
+) -> tuple[str, RGB]:
+    """Return a judge-readable read of the rival ERS belief and its colour.
+
+    The tactically important distinction is deliberate energy saving
+    (``Lharvest``) versus physical depletion (``Lderate``): the first is a
+    trap, the second is an opportunity. The four raw probabilities are
+    deliberately not enough on their own for a non-technical judge.
+    """
+    harvest = max(0.0, float(probabilities.get("Lharvest", 0.0)))
+    derate = max(0.0, float(probabilities.get("Lderate", 0.0)))
+    if derate >= _BELIEF_DOMINANCE and derate >= harvest:
+        return "PHYSICALLY DEPLETED · ATTACK WINDOW", GREEN
+    if harvest >= _BELIEF_DOMINANCE and harvest > derate:
+        return "DELIBERATELY SAVING · HOLD", AMBER
+    return "CAPABILITY UNRESOLVED · PROBE", MUTED
+
 
 @dataclass(frozen=True)
 class JudgeModeProbability:
@@ -706,9 +729,16 @@ class JudgeModePanel:
         belief_x = left + width * 0.38
         self._t("belief_header", snapshot.rival_label, belief_x, content_top, 10,
                  MUTED, bold=True)
+        # The verdict is the five-second read: is the rival sandbagging (a trap)
+        # or genuinely spent (an opportunity)? The bars below only evidence it.
+        verdict, verdict_color = describe_capability_belief(
+            {mode.mode: mode.probability for mode in snapshot.rival_modes}
+        )
+        self._t("belief_verdict", verdict, belief_x, content_top - 20, 8,
+                 verdict_color, bold=True)
         meter_width = max(90.0, min(180.0, width * 0.18))
         for index, mode in enumerate(snapshot.rival_modes):
-            y = content_top - 23 - index * 22
+            y = content_top - 40 - index * 20
             self._t(f"mode_label_{index}", mode.mode, belief_x, y, 9,
                      mode.color, bold=True)
             meter_left = belief_x + 62
@@ -962,19 +992,32 @@ class JudgeWalkthroughPanel:
             return
 
         if step_index == 1:
+            probabilities = {mode.mode: mode.probability
+                             for mode in snapshot.rival_modes}
+            verdict, verdict_color = describe_capability_belief(probabilities)
             self._t("proof_belief_header", "ERS CAPABILITY BELIEF",
                      left + pad, top - 78, 9, MUTED, bold=True)
+            self._t("proof_belief_verdict", verdict, left + pad, top - 100, 8,
+                     verdict_color, bold=True)
+            descriptors = {
+                "Lharvest": "deliberately saving energy",
+                "Lderate": "physically depleted",
+            }
             for index, mode in enumerate(snapshot.rival_modes):
-                y = top - 105 - index * 26
+                y = top - 128 - index * 26
                 self._t(f"proof_mode_{index}", mode.mode, left + pad, y, 9,
                          mode.color, bold=True)
                 meter_left = left + pad + 76
-                meter_width = max(100.0, width - 144.0)
+                meter_width = max(100.0, width - 210.0)
                 draw_meter(meter_left, y, meter_width, 10,
                            mode.probability, mode.color)
                 self._t(f"proof_mode_value_{index}",
                          f"{mode.probability * 100:.0f}%",
                          meter_left + meter_width + 8, y, 9, TEXT, bold=True)
+                descriptor = descriptors.get(mode.mode)
+                if descriptor:
+                    self._t(f"proof_mode_desc_{index}", descriptor,
+                             meter_left + meter_width + 56, y, 7, mode.color)
             self._t("proof_belief_note", "BELIEF ≠ RIVAL BATTERY SOC",
                      left + pad, bottom + 22, 7, AMBER, bold=True)
         elif step_index == 2:
