@@ -36,7 +36,10 @@ def episode(controller: str, mode: HiddenRivalMode, scenario: str,
         "scenario": scenario,
         "seed": seed,
         "final_gap_s": simulator.ego.gap_s,
-        "energy_used": 70.0 - simulator.ego.energy,
+        "initial_energy": simulator.initial_energy,
+        "energy_used": simulator.cumulative_deployed,
+        "energy_recovered": simulator.cumulative_recovered,
+        "net_energy_change": simulator.initial_energy - simulator.ego.energy,
         "burn_steps": burns,
         "completed": len(trace) == steps,
     }
@@ -70,6 +73,8 @@ def benchmark(seeds: list[int], steps: int = 100) -> dict:
         summaries[f"{key[0]}:{key[1]}:{key[2]}"] = {
             "gap_s": _summary([row["final_gap_s"] for row in group]),
             "energy_used": _summary([row["energy_used"] for row in group]),
+            "energy_recovered": _summary([row["energy_recovered"] for row in group]),
+            "net_energy_change": _summary([row["net_energy_change"] for row in group]),
             "burn_steps": _summary([row["burn_steps"] for row in group]),
             "completion_rate": sum(row["completed"] for row in group) / len(group),
         }

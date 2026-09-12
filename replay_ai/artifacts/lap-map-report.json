@@ -1,0 +1,20 @@
+{
+  "schema": "lap-map-evaluation.v1",
+  "reports": {
+    "train": {
+      "samples": 1460,
+      "mae_s": 0.5731325296477494,
+      "max_error_s": 3.4290440000000046
+    },
+    "validation": {
+      "samples": 360,
+      "mae_s": 1.8547350418650799,
+      "max_error_s": 10.050730000000001
+    },
+    "test": {
+      "samples": 180,
+      "mae_s": 1.8285253329365083,
+      "max_error_s": 9.162290000000013
+    }
+  }
+}

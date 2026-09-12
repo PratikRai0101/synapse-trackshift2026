@@ -32,7 +32,7 @@ nohup uv pip install --python .venv/bin/python pyside6-essentials \
 Verify:
 
 ```sh
-.venv/bin/python -m pytest -q      # 141 passed
+.venv/bin/python -m pytest -q      # 201 passed
 ```
 
 ## What the model actually knows
@@ -105,10 +105,11 @@ Held-out event evaluation (fit only on train events):
   data/synthetic-labelled.jsonl --output artifacts/hmm-split-report.json
 ```
 
-The report keeps events, not rows, in separate partitions. On a 100-event
-synthetic mixture, the current reference run produced 67 train, 21 validation
-and 12 test events with overall accuracy 0.821 / 0.802 / 0.771. These are
-synthetic results, not real-race validation.
+The report keeps events, not rows, in separate partitions. The checked-in
+100-event synthetic run contains 67 train, 21 validation and 12 test events.
+Its overall ERS-mode accuracy is 0.528 / 0.417 / 0.533, while the tactically
+critical harvest-vs-derate accuracy is 0.997 / 0.997 / 1.000. These are
+synthetic-generator results, not real-race validation.
 
 Real telemetry export, and the leakage-safe event split:
 
@@ -149,16 +150,18 @@ pedal-derived energy proxies.
 On synthetic labelled data, and on **held-out** data drawn from the same
 generator:
 
-| configuration | overall accuracy | harvest-vs-derate accuracy |
-|---|---|---|
-| default emissions, `sigma=1.0` | 0.465 | — |
-| fitted means + fitted per-feature scale | 0.650 | 0.989 |
+| held-out synthetic test metric | result |
+|---|---:|
+| four-way ERS-mode accuracy | 0.533 |
+| harvest-vs-derate accuracy | 1.000 |
+| test events / observations | 12 / 720 |
 
-The tactically critical metric is the second column: among samples whose true
-mode is `Lharvest` or `Lderate`, how often the filter picked the *other* one.
-That is the confusion that causes the controller to attack a car that is
-deliberately saving energy. It is rare; the residual error sits on the
-`H`/`M` boundary, which only misprices energy rather than inverting the decision.
+The tactically critical metric separates `Lharvest` from `Lderate`; confusing
+those modes can trigger an attack against a rival deliberately saving energy.
+The result only shows that the inference machinery recovers signatures created
+by its synthetic generator. It does not establish the same separation on an
+unlabelled real car. The modest four-way score also means `H` versus `M` must be
+shown as uncertainty, not presented as a reliable classification.
 
 ## Paired benchmark matrix
 
@@ -235,8 +238,8 @@ Fitting a pooled within-mode standard deviation per feature
    SOH now scales usable Level 3 energy, adds resistance/wear cost, and fades
    under closed-loop throughput. The constants are not yet fitted to cell or
    race battery data.
-6. **Level 2 now has explicit spatial SOC and bounded belief-tree baselines,
-   but not production SOCP/POMCP.** `socp_envelope.py` projects requested
+6. **Level 2 has explicit spatial state and bounded belief-tree search,
+   but not a production SOCP.** `socp_envelope.py` projects requested
    speed/longitudinal acceleration onto the tyre cone and reports primal
    residuals. `spatial_planner.py` evaluates the upcoming curvature profile and
    produces a distance-indexed speed/costate reference. `scenario_search.py`
@@ -245,8 +248,9 @@ Fitting a pooled within-mode standard deviation per feature
    BURN/HARVEST. Level 1 now has a linear
    zone-MPC LP (`zone_mpc.py`) with speed-zone and reserve constraints; it still
    requires actuator and plant validation before production use.
-7. **The season SOH model is a reference degradation model.** It is a small
-   finite-horizon DP with indicative constants, not a validated cell model.
+7. **The season SOH model is a reference degradation model.** It is a real
+   finite-horizon retain/replace DP with indicative time-equivalent constants,
+   not a validated cell model or championship-points optimizer.
 8. **The closed loop is a development simulator.** It is action-responsive,
    now includes curvature-aware combined grip, tyre wear/temperature, battery
    temperature/resistance, fuel mass, slipstream, dirty-air loss, pit events,

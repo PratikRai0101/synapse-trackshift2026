@@ -1,0 +1,105 @@
+{
+  "schema": "hmm-split-evaluation.v1",
+  "event_counts": {
+    "train": 67,
+    "validation": 21,
+    "test": 12
+  },
+  "row_counts": {
+    "train": 4020,
+    "validation": 1260,
+    "test": 720
+  },
+  "reports": {
+    "train": {
+      "accuracy": 0.5276119402985074,
+      "samples": 4020,
+      "harvest_vs_derate_accuracy": 0.996900826446281,
+      "harvest_vs_derate_samples": 1936,
+      "confusion": {
+        "Lharvest": {
+          "M": 85,
+          "Lharvest": 821,
+          "H": 26,
+          "Lderate": 6
+        },
+        "H": {
+          "M": 515,
+          "H": 445,
+          "Lderate": 208,
+          "Lharvest": 3
+        },
+        "M": {
+          "M": 361,
+          "H": 422,
+          "Lderate": 100,
+          "Lharvest": 30
+        },
+        "Lderate": {
+          "M": 370,
+          "H": 134,
+          "Lderate": 494
+        }
+      }
+    },
+    "validation": {
+      "accuracy": 0.4174603174603175,
+      "samples": 1260,
+      "harvest_vs_derate_accuracy": 0.9966832504145937,
+      "harvest_vs_derate_samples": 603,
+      "confusion": {
+        "H": {
+          "M": 124,
+          "H": 76,
+          "Lderate": 57,
+          "Lharvest": 1
+        },
+        "Lderate": {
+          "Lderate": 151,
+          "H": 56,
+          "M": 189
+        },
+        "M": {
+          "M": 127,
+          "Lderate": 57,
+          "H": 209,
+          "Lharvest": 6
+        },
+        "Lharvest": {
+          "M": 28,
+          "Lharvest": 172,
+          "Lderate": 2,
+          "H": 5
+        }
+      }
+    },
+    "test": {
+      "accuracy": 0.5333333333333333,
+      "samples": 720,
+      "harvest_vs_derate_accuracy": 1.0,
+      "harvest_vs_derate_samples": 298,
+      "confusion": {
+        "H": {
+          "M": 96,
+          "H": 76,
+          "Lderate": 55
+        },
+        "Lharvest": {
+          "M": 14,
+          "Lharvest": 70,
+          "H": 1
+        },
+        "Lderate": {
+          "M": 54,
+          "H": 17,
+          "Lderate": 142
+        },
+        "M": {
+          "H": 76,
+          "M": 96,
+          "Lderate": 23
+        }
+      }
+    }
+  }
+}

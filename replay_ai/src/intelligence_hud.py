@@ -172,9 +172,14 @@ class RaceEngineerHUD:
             resistance = metrics.get("battery_resistance")
             residual = metrics.get("socp_residual")
             status = "OK" if metrics.get("socp_feasible") else "CHECK"
+            model_status = ("CAL" if metrics.get("hmm_source") != "default"
+                            else "FALLBACK")
+            lap_status = ("MAP" if metrics.get("lap_map_source") != "unavailable"
+                          else "NO-MAP")
             self._t(
                 "runtime_metrics",
-                f"SOH {soh:.3f}  R {resistance:.3f}  SOCP {status} "
+                f"MODEL {model_status}/{lap_status}  SOH {soh:.3f}  "
+                f"R {resistance:.3f}  ENVELOPE {status} "
                 f"res {residual if residual is not None else 'n/a'}",
                 left + pad, top - 160, 9, MUTED,
             )

@@ -17,13 +17,14 @@ features, and runs a 40-state forward HMM over
 `ERS × override × tyre = 4 × 2 × 5`. The ERS/SOC output is a **belief estimate**,
 not measured battery telemetry: FastF1 does not publish rival SOC.
 
-The replay wires this backend into the focus-driver report. It also includes a
-small season SOH dynamic-programming reference and a tactical command facade
-(`BURN`, `HARVEST`, `PROACTIVE TRAP`) suitable for fitting emissions and
-replacing the reference envelope/search with validated models later.
+The replay wires this backend into the focus-driver report. Stateful inference
+advances once per unique replay frame—not once per render—and is isolated per
+ego/rival pair. It includes a finite-horizon season SOH decision program and
+tactical commands (`BURN`, `HARVEST`, `PROACTIVE TRAP`).
 
-See [docs/AIBackend.md](./docs/AIBackend.md) for the environment setup, the
-calibration pipeline and the currently measured accuracy.
+See the [canonical architecture](./docs/ARCHITECTURE.md) and
+[AI backend guide](./docs/AIBackend.md) for model boundaries, environment setup,
+calibration and measured synthetic results.
 
 - **Race Replay Visualization:** Watch the race unfold with real-time driver positions on a rendered track.
 - **Safety Car Visualization:** See the Safety Car deploy from pit lane, lead the field, and return to pits — with animated transitions and pulsing glow effects.

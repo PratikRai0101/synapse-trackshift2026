@@ -107,16 +107,35 @@ class F1RaceReplayWindow(arcade.Window):
         self.race_engineer = RaceEngineer(config=self._model_config)
         # Hierarchical public-telemetry backend.  FastF1 has no battery/SOC
         # channel, so the HMM output remains an explicitly labelled belief.
-        hmm_artifact = os.environ.get("HMM_EMISSIONS_ARTIFACT", "artifacts/hmm-emissions.json")
-        lap_map_artifact = os.environ.get("LAP_TIME_MAP_ARTIFACT", "artifacts/lap-time-map.json")
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        hmm_artifact = os.environ.get(
+            "HMM_EMISSIONS_ARTIFACT",
+            os.path.join(project_root, "artifacts", "hmm-emissions.json"),
+        )
+        lap_map_artifact = os.environ.get(
+            "LAP_TIME_MAP_ARTIFACT",
+            os.path.join(project_root, "artifacts", "lap-time-map.json"),
+        )
+        self._hmm_artifact = hmm_artifact
+        self._lap_map_artifact = lap_map_artifact
         self.motorsport_intelligence = MotorsportIntelligence(
             hmm_artifact=hmm_artifact,
             lap_map_artifact=lap_map_artifact,
         )
+        self._intelligence_models = {}
+        self._intelligence_cache = {}
         self.race_engineer_hud = RaceEngineerHUD()
         self._energy_cache = {}
         self._focus_gap_ahead_s = None
         self._focus_report = None
+        # Stateful inference advances once per unique replay observation, never
+        # once per render. This keeps pause state and display FPS from changing
+        # the HMM posterior.
+        self._last_intelligence_key = None
+        self._last_tactical = None
+        self._last_rival_hmm = None
+        self._last_lap_plan = None
+        self._last_runtime_metrics = {}
         # UI components
         leaderboard_x = max(20, self.width - self.right_ui_margin + 12)
         self.leaderboard_comp = LeaderboardComponent(x=leaderboard_x, width=240, visible=visible_hud)
@@ -1483,15 +1502,30 @@ class F1RaceReplayWindow(arcade.Window):
                 lap=int(rival.get("lap", lap) or lap),
                 tyre_life=float(rival.get("tyre_life", 0.0) or 0.0),
             )
-            report.tactical = self.motorsport_intelligence.observe(
-                rival_obs,
-                own_speed_kmh=float(fdrv.get("speed", 0.0) or 0.0),
-                own_soc=energy.soc,
-                gap_s=gap_ahead_s,
-            )
-            report.rival_hmm = self.motorsport_intelligence.last_hmm
-            report.lap_plan = self.motorsport_intelligence.last_lap_plan
-            report.runtime_metrics = self.motorsport_intelligence.runtime_metrics()
+            pair_key = (focus_code, ahead)
+            intelligence_key = (frame_idx, *pair_key)
+            cached = self._intelligence_cache.get(intelligence_key)
+            if cached is None:
+                model = self._intelligence_models.get(pair_key)
+                if model is None:
+                    model = MotorsportIntelligence(
+                        hmm_artifact=self._hmm_artifact,
+                        lap_map_artifact=self._lap_map_artifact,
+                    )
+                    self._intelligence_models[pair_key] = model
+                tactical = model.observe(
+                    rival_obs,
+                    own_speed_kmh=float(fdrv.get("speed", 0.0) or 0.0),
+                    own_soc=energy.soc,
+                    gap_s=gap_ahead_s,
+                )
+                cached = (tactical, model.last_hmm, model.last_lap_plan,
+                          model.runtime_metrics())
+                self._intelligence_cache[intelligence_key] = cached
+            (report.tactical, report.rival_hmm, report.lap_plan,
+             runtime_metrics) = cached
+            report.runtime_metrics = dict(runtime_metrics)
+            self._last_intelligence_key = intelligence_key
         return report
 
     def update_scaling(self, screen_w, screen_h):
