@@ -1,0 +1,59 @@
+{
+  "schema_version": "gridops.run.v1",
+  "artifact_kind": "non_executable_contract_example",
+  "execution_ready": false,
+  "run_id": "example-not-a-measured-run",
+  "run_mode": "simulation",
+  "clock_origin_utc": null,
+  "code_revision_or_tree_hash": null,
+  "dependency_lock_hash": null,
+  "hardware": {"cpu": null, "ram_gb": null, "gpu": null, "os": null},
+  "scenario": {"id": null, "version": null, "hash": null},
+  "plant": {"id": null, "version": null, "parameter_manifest_hash": null},
+  "controller": {"id": "ambiguity-aware", "version": null, "artifact_hash": null},
+  "ruleset": {"id": null, "event_verified": false, "hash": null},
+  "observation_model": {
+    "version": null,
+    "cadence_s": null,
+    "delay_model": null,
+    "noise_model": null,
+    "missingness_model": null,
+    "source_provenance": "simulated_measurement"
+  },
+  "randomness": {
+    "master_seed": 1,
+    "stream_names": ["plant", "sensor", "opponent", "controller"],
+    "stream_derivation_version": null
+  },
+  "compute": {
+    "mode": "fixed_work_reproducible",
+    "candidate_cap": 5,
+    "hypotheses_per_candidate_cap": 16,
+    "tactical_horizon_s": null,
+    "plant_step_s": 0.02,
+    "advisory_replan_interval_s": 1.0,
+    "wall_clock_stress_test_cutoff_ms": 500,
+    "values_are": "proposed_starting_configuration_not_measured_performance"
+  },
+  "objective": {
+    "primary": "episode_finish_time",
+    "unit": "s",
+    "continuation_map_hash": null,
+    "terminal_constraints": null,
+    "stress_price_s_per_unit": null,
+    "stress_price_provenance": "unknown",
+    "commitment_margin_s": null,
+    "error_allowance_s": null,
+    "error_allowance_provenance": "unknown"
+  },
+  "evaluation": {
+    "split": "development",
+    "pass_definition_version": null,
+    "metric_version": null,
+    "failure_accounting_policy": null,
+    "tolerances_version": null
+  },
+  "readiness_errors": [
+    "Complete and verify scenario, parameters, event rules, dependencies and evaluation contracts before execution."
+  ]
+}
