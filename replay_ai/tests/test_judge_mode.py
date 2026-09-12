@@ -8,8 +8,11 @@ from src.judge_mode import (
     JudgeModeController,
     JudgeModeModel,
     JudgeModePanel,
+    JudgePresentController,
+    JudgePresentPanel,
     JudgeWalkthroughController,
     JudgeWalkthroughPanel,
+    available_present_cards,
     build_bookmarks,
     build_walkthrough_steps,
     describe_capability_belief,
@@ -252,6 +255,56 @@ def test_judge_panel_draws_against_a_window_contract(monkeypatch):
     assert any(kind == "draw_rect_filled" for kind, _ in calls)
 
 
+def test_present_deck_adds_counterfactual_only_after_a_branch():
+    plain = available_present_cards(None)
+
+    assert "counterfactual" not in plain
+    assert plain[0] == "recommendation"
+    assert plain[-1] == "architecture"
+    branch = SimpleNamespace(outcomes=(SimpleNamespace(),))
+    assert "counterfactual" in available_present_cards(branch)
+
+
+def test_present_controller_pages_within_bounds():
+    controller = JudgePresentController()
+
+    assert controller.visible is False
+    assert controller.toggle() is True
+    assert controller.select(99, 6) == 5
+    assert controller.step(1, 6) == 5
+    assert controller.step(-1, 6) == 4
+    assert controller.close() is False
+
+
+def test_present_panel_draws_and_hit_tests(monkeypatch):
+    calls = []
+
+    class FakeText:
+        def __init__(self, *args, **kwargs):
+            self.text = args[0] if args else ""
+
+        def draw(self):
+            calls.append(("text", self.text))
+
+    monkeypatch.setattr("src.judge_mode.arcade.Text", FakeText)
+    for name in ("draw_rect_filled", "draw_rect_outline", "draw_text"):
+        monkeypatch.setattr("src.judge_mode.arcade." + name,
+                            lambda *args, **kwargs: None)
+    monkeypatch.setattr("src.judge_mode.draw_panel", lambda *args, **kwargs: None)
+    monkeypatch.setattr("src.judge_mode.draw_meter", lambda *args, **kwargs: None)
+
+    window = SimpleNamespace(width=1280, height=720, total_laps=53)
+    controller = JudgePresentController(visible=True)
+    panel = JudgePresentPanel()
+    panel.draw(window, controller, snapshot=JudgeModeModel.from_report(_report()))
+
+    assert any("THE CALL" == text for kind, text in calls if kind == "text")
+    assert any("VER" in text for kind, text in calls if kind == "text")
+    assert len(panel.page_rects) == len(available_present_cards(None))
+    action, left, bottom, right, top = panel.action_rects[0]
+    assert panel.hit_test((left + right) / 2.0, (bottom + top) / 2.0) == action
+
+
 def test_walkthrough_is_a_deterministic_monza_path():
     bookmarks = build_bookmarks(frame_count=101, total_laps=53)
     steps = build_walkthrough_steps(
@@ -396,3 +449,28 @@ def test_walkthrough_window_flow_keeps_bookmark_and_branch_separate(monkeypatch)
     assert window._counterfactual_branch is None
     assert window.frame_index == window.judge_bookmarks[5].frame_index
     assert window.frames == original_frames
+
+
+def test_present_toggle_pauses_and_pages_the_deck():
+    window = object.__new__(F1RaceReplayWindow)
+    window.paused = False
+    window._counterfactual_branch = None
+    window.judge_walkthrough_controller = JudgeWalkthroughController(
+        build_walkthrough_steps(build_bookmarks(7, 1))
+    )
+    window.judge_walkthrough_controller.open()
+    window.judge_present_controller = JudgePresentController()
+    window.judge_present_panel = JudgePresentPanel()
+    window._refresh_decision_layout = lambda: None
+
+    assert window._present_card_count() == len(available_present_cards(None))
+    assert window._toggle_judge_present() is True
+    assert window.judge_present_controller.visible is True
+    assert window.paused is True
+    # The two modal surfaces are mutually exclusive.
+    assert window.judge_walkthrough_controller.visible is False
+
+    window._step_judge_present(1)
+    assert window.judge_present_controller.index == 1
+    window._select_judge_present_page(99)
+    assert window.judge_present_controller.index == window._present_card_count() - 1

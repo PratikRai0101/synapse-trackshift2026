@@ -1333,12 +1333,443 @@ class JudgeWalkthroughPanel:
                  center_y + 8, 9, ELECTRIC, bold=True)
         self._t(
             "hint_body",
-            f"Press H or ? for the six-step {scenario_label} walkthrough",
+            (f"H or ? = six-step walkthrough  •  V = present the decision"
+             f"  ({scenario_label})"),
             self.hint_bounds.left + 16,
             center_y - 10,
             9,
             TEXT,
         )
+
+
+PRESENT_CARD_TITLES = {
+    "recommendation": "THE CALL",
+    "belief": "HIDDEN RIVAL STATE",
+    "why": "WHY THE MODEL CHANGED",
+    "alternatives": "TACTICAL ALTERNATIVES",
+    "counterfactual": "COUNTERFACTUAL BRANCH",
+    "architecture": "DECISION HIERARCHY",
+}
+
+
+def available_present_cards(branch: Any) -> tuple[str, ...]:
+    """Return the presentation cards for the current session.
+
+    The counterfactual card only exists once a branch has actually been run,
+    so the deck never pages onto an empty slide.
+    """
+    cards = ["recommendation", "belief", "why", "alternatives"]
+    if branch is not None and getattr(branch, "outcomes", ()):
+        cards.append("counterfactual")
+    cards.append("architecture")
+    return tuple(cards)
+
+
+class JudgePresentController:
+    """Pager state for the full-screen decision presentation."""
+
+    def __init__(self, visible: bool = False) -> None:
+        self.visible = bool(visible)
+        self.index = 0
+
+    def open(self) -> bool:
+        self.visible = True
+        return self.visible
+
+    def close(self) -> bool:
+        self.visible = False
+        return self.visible
+
+    def toggle(self) -> bool:
+        return self.close() if self.visible else self.open()
+
+    def select(self, index: int, count: int) -> int:
+        if count <= 0:
+            self.index = 0
+        else:
+            self.index = max(0, min(int(count) - 1, int(index)))
+        return self.index
+
+    def step(self, direction: int, count: int) -> int:
+        return self.select(self.index + (1 if direction >= 0 else -1), count)
+
+
+class JudgePresentPanel:
+    """Full-screen, one-idea-per-card presentation of a Judge Mode snapshot.
+
+    The docked panel is the always-on instrument; this surface gives each
+    decision dimension room to breathe for a projector or a back-of-room
+    judge. The persistent header keeps driver, call and confidence visible
+    no matter which card is showing, so context never scrolls away.
+    """
+
+    def __init__(self, max_width: float = 1360.0) -> None:
+        self.max_width = max_width
+        self._texts: dict[str, arcade.Text] = {}
+        self.action_rects: list[tuple[str, float, float, float, float]] = []
+        self.page_rects: list[tuple[int, float, float, float, float]] = []
+
+    def _t(self, key: str, text: str, x: float, y: float, size: int,
+           color: RGB = TEXT, bold: bool = False,
+           anchor_x: str = "left") -> None:
+        obj = self._texts.get(key)
+        if obj is None:
+            obj = arcade.Text(text, x, y, color, size, bold=bold,
+                              anchor_x=anchor_x, anchor_y="center")
+            self._texts[key] = obj
+        else:
+            obj.text = text
+            obj.x = x
+            obj.y = y
+            obj.color = color
+            obj.font_size = size
+            obj.bold = bold
+        obj.draw()
+
+    def layout_bounds(self, window_width: float, window_height: float) -> PanelBounds:
+        width = min(self.max_width, max(360.0, float(window_width) - 80.0))
+        height = max(360.0, float(window_height) - 80.0)
+        return PanelBounds(
+            left=(float(window_width) - width) / 2.0,
+            bottom=(float(window_height) - height) / 2.0,
+            width=width,
+            height=height,
+        )
+
+    @staticmethod
+    def _contains(rect: tuple[float, float, float, float], x: float, y: float) -> bool:
+        left, bottom, right, top = rect
+        return left <= x <= right and bottom <= y <= top
+
+    def _button(self, action: str, label: str, left: float, bottom: float,
+                width: float, color: RGB = EDGE_SOFT) -> None:
+        rect = (left, bottom, left + width, bottom + 30.0)
+        self.action_rects.append((action, *rect))
+        arcade.draw_rect_filled(
+            arcade.XYWH(left + width / 2.0, bottom + 15.0, width, 30.0), color,
+        )
+        arcade.draw_rect_outline(
+            arcade.XYWH(left + width / 2.0, bottom + 15.0, width, 30.0),
+            ELECTRIC if action == "next" else EDGE, 1,
+        )
+        self._t(f"present_btn_{action}", label, left + width / 2.0, bottom + 15.0,
+                10, TEXT, bold=True, anchor_x="center")
+
+    def _section(self, key: str, title: str, left: float, top: float,
+                 pad: float, color: RGB = MUTED) -> None:
+        self._t(f"present_sec_{key}", title, left + pad, top, 12, color, bold=True)
+
+    def _draw_recommendation(self, snapshot: JudgeModeSnapshot, left: float,
+                             bottom: float, width: float, top: float,
+                             pad: float) -> None:
+        self._section("rec", PRESENT_CARD_TITLES["recommendation"], left, top, pad)
+        self._t("present_rec_command", snapshot.command_label, left + pad,
+                 top - 52, 46, snapshot.command_color, bold=True)
+        self._t("present_rec_conf", f"{snapshot.confidence * 100:.0f}% confidence",
+                 left + pad, top - 94, 16, TEXT, bold=True)
+        draw_meter(left + pad, top - 120, min(560.0, width - 2 * pad), 12,
+                   snapshot.confidence, snapshot.command_color)
+
+        target = (f"{snapshot.target_speed_kmh:.0f} km/h"
+                  if snapshot.target_speed_kmh is not None else "pending")
+        lap_target = (f"{snapshot.lap_energy_target:.1f} EU"
+                      if snapshot.lap_energy_target is not None else "pending")
+        reserve = (f"{snapshot.reserve_after_lap:.1f} EU"
+                   if snapshot.reserve_after_lap is not None else "pending")
+        col_w = max(180.0, (width - 2 * pad) / 2.0)
+        rows = (
+            ("TARGET SPEED", target, "OWN STORE (EST.)", f"{snapshot.own_energy_eu:.0f} EU"),
+            ("LAP TARGET", lap_target, "RESERVE AFTER LAP", reserve),
+        )
+        for row_index, (l1, v1, l2, v2) in enumerate(rows):
+            y = top - 162 - row_index * 34
+            self._t(f"present_rec_l1_{row_index}", l1, left + pad, y, 9, MUTED, bold=True)
+            self._t(f"present_rec_v1_{row_index}", v1, left + pad, y - 15, 13, TEXT, bold=True)
+            self._t(f"present_rec_l2_{row_index}", l2, left + pad + col_w, y, 9, MUTED, bold=True)
+            self._t(f"present_rec_v2_{row_index}", v2, left + pad + col_w, y - 15, 13, TEXT, bold=True)
+        envelope = f"ENVELOPE {snapshot.envelope_status}"
+        if snapshot.envelope_residual is not None:
+            envelope += f"  •  residual {snapshot.envelope_residual:.3g}"
+        self._t("present_rec_envelope", envelope, left + pad, top - 240, 10,
+                 GREEN if snapshot.envelope_status == "FEASIBLE" else AMBER, bold=True)
+        self._t("present_rec_reason", f"→ {snapshot.explanation}", left + pad,
+                 bottom + 66, 11, snapshot.command_color)
+
+    def _draw_belief(self, snapshot: JudgeModeSnapshot, left: float,
+                     bottom: float, width: float, top: float,
+                     pad: float) -> None:
+        self._section("belief", PRESENT_CARD_TITLES["belief"], left, top, pad)
+        probabilities = {mode.mode: mode.probability for mode in snapshot.rival_modes}
+        verdict, verdict_color = describe_capability_belief(probabilities)
+        self._t("present_belief_verdict", verdict, left + pad, top - 40, 18,
+                 verdict_color, bold=True)
+        descriptors = {
+            "Lharvest": "deliberately saving energy",
+            "Lderate": "physically depleted",
+        }
+        label_w = 150.0
+        meter_w = max(180.0, min(560.0, width * 0.46))
+        for index, mode in enumerate(snapshot.rival_modes):
+            y = top - 86 - index * 36
+            self._t(f"present_mode_{index}", mode.mode, left + pad, y, 14,
+                     mode.color, bold=True)
+            meter_left = left + pad + label_w
+            draw_meter(meter_left, y, meter_w, 14, mode.probability, mode.color)
+            self._t(f"present_mode_value_{index}",
+                     f"{mode.probability * 100:.0f}%",
+                     meter_left + meter_w + 12, y, 14, TEXT, bold=True)
+            descriptor = descriptors.get(mode.mode)
+            if descriptor:
+                self._t(f"present_mode_desc_{index}", descriptor,
+                         meter_left + meter_w + 70, y, 10, mode.color)
+        self._t("present_belief_note",
+                 "BELIEF ≠ RIVAL BATTERY SOC  •  PUBLIC SIGNALS ONLY",
+                 left + pad, bottom + 66, 10, AMBER, bold=True)
+
+    def _draw_why(self, snapshot: JudgeModeSnapshot, left: float,
+                  bottom: float, width: float, top: float, pad: float) -> None:
+        self._section("why", PRESENT_CARD_TITLES["why"], left, top, pad)
+        for index, evidence in enumerate(snapshot.evidence[:5]):
+            self._t(f"present_evidence_{index}", f"✓  {evidence}", left + pad,
+                     top - 48 - index * 32, 13, TEXT)
+        self._t("present_why_conclusion", f"→ {snapshot.explanation}",
+                 left + pad, top - 48 - min(len(snapshot.evidence), 5) * 32 - 8,
+                 13, snapshot.command_color, bold=True)
+        layers = "  →  ".join((
+            "HMM40",
+            "POMCP" if snapshot.search_particles else "SEARCH",
+            "SOCP",
+            "MPC",
+        ))
+        self._t("present_why_layers", f"LAYER ACTIVITY   {layers}", left + pad,
+                 bottom + 66, 11, ELECTRIC, bold=True)
+
+    def _draw_alternatives(self, snapshot: JudgeModeSnapshot, left: float,
+                           bottom: float, width: float, top: float,
+                           pad: float) -> None:
+        title = (f"{PRESENT_CARD_TITLES['alternatives']}  •  "
+                 f"{snapshot.search_particles} PARTICLES"
+                 if snapshot.search_particles else PRESENT_CARD_TITLES["alternatives"])
+        self._section("alternatives", title, left, top, pad)
+        content_w = width - 2 * pad
+        columns = (
+            (0.00, "ACTION", "left"),
+            (0.30, "IMMEDIATE GAIN", "left"),
+            (0.52, "ENERGY COST", "left"),
+            (0.72, "LATER VALUE", "left"),
+            (1.00, "DECISION", "right"),
+        )
+        for offset, label, anchor in columns:
+            self._t(f"present_alt_head_{label}", label,
+                     left + pad + content_w * offset, top - 42, 10, MUTED,
+                     bold=True, anchor_x=anchor)
+        for index, option in enumerate(snapshot.options[:3]):
+            y = top - 78 - index * 40
+            color = snapshot.command_color if option.selected else MUTED
+            marker = "SELECTED" if option.selected else "REJECTED"
+            self._t(f"present_alt_name_{index}", option.command, left + pad, y,
+                     14, color, bold=option.selected)
+            self._t(f"present_alt_gain_{index}", f"{option.gap_gain_s:+.2f} s",
+                     left + pad + content_w * 0.30, y, 13, TEXT)
+            self._t(f"present_alt_energy_{index}",
+                     f"{option.energy_delta_eu:+.1f} EU",
+                     left + pad + content_w * 0.52, y, 13, MUTED)
+            self._t(f"present_alt_later_{index}",
+                     f"{option.continuation_value:+.2f}",
+                     left + pad + content_w * 0.72, y, 13, TEXT)
+            self._t(f"present_alt_status_{index}", marker,
+                     left + pad + content_w, y, 13, color, bold=option.selected,
+                     anchor_x="right")
+        self._t("present_alt_note",
+                 "POSITIVE ENERGY COST SPENDS STORE; NEGATIVE RECOVERS IT",
+                 left + pad, bottom + 66, 10, ELECTRIC, bold=True)
+
+    def _draw_counterfactual(self, branch: Any, left: float, bottom: float,
+                             width: float, top: float, pad: float) -> None:
+        self._section("counterfactual", PRESENT_CARD_TITLES["counterfactual"],
+                      left, top, pad, color=AMBER)
+        self._t("present_cf_source",
+                 f"FORKED FROM RECORDED FRAME {branch.source_frame_index}  •  "
+                 "RESULTS AVERAGED, REPLAY UNCHANGED",
+                 left + pad, top - 40, 10, MUTED, bold=True)
+        content_w = width - 2 * pad
+        columns = (
+            (0.00, "ACTION", "left"),
+            (0.30, "Δ GAP", "left"),
+            (0.48, "FINAL GAP", "left"),
+            (0.66, "STORE", "left"),
+            (1.00, "RESPONSES", "right"),
+        )
+        for offset, label, anchor in columns:
+            self._t(f"present_cf_head_{label}", label,
+                     left + pad + content_w * offset, top - 72, 10, MUTED,
+                     bold=True, anchor_x=anchor)
+        for index, outcome in enumerate(branch.outcomes[:3]):
+            y = top - 108 - index * 40
+            color = AMBER if index == 0 else MUTED
+            self._t(f"present_cf_name_{index}", outcome.action, left + pad, y,
+                     14, color, bold=index == 0)
+            self._t(f"present_cf_delta_{index}",
+                     f"{getattr(outcome, 'gap_change_s', 0.0):+.2f} s",
+                     left + pad + content_w * 0.30, y, 13, TEXT)
+            self._t(f"present_cf_final_{index}", f"{outcome.final_gap_s:.2f} s",
+                     left + pad + content_w * 0.48, y, 13, TEXT)
+            self._t(f"present_cf_store_{index}",
+                     f"{outcome.final_energy:.0f} EU",
+                     left + pad + content_w * 0.66, y, 13, MUTED)
+            self._t(f"present_cf_modes_{index}",
+                     f"{outcome.plausible_modes}",
+                     left + pad + content_w, y, 13, color,
+                     anchor_x="right")
+        self._t("present_cf_note",
+                 "HIDDEN RIVAL MODE NEVER ENTERS THE DECISION",
+                 left + pad, bottom + 66, 10, AMBER, bold=True)
+
+    def _draw_architecture(self, snapshot: JudgeModeSnapshot, left: float,
+                           bottom: float, width: float, top: float,
+                           pad: float) -> None:
+        self._section("architecture", PRESENT_CARD_TITLES["architecture"],
+                      left, top, pad)
+        target = (f"MAX {snapshot.target_speed_kmh:.0f} km/h"
+                  if snapshot.target_speed_kmh is not None else "EXECUTE")
+        stages = (
+            ("PUBLIC TELEMETRY", "speed · throttle · brake · gap · aero proxy",
+             ELECTRIC),
+            ("HMM • 40-STATE BELIEF", "rival ERS capability, estimated", MODE_COLORS["H"]),
+            ("POMCP • SCENARIO SEARCH",
+             (f"{snapshot.search_particles} particles / "
+              f"{snapshot.search_histories} histories") if snapshot.search_particles
+             else "bounded action search", AMBER),
+            ("SOCP • PERFORMANCE ENVELOPE",
+             f"{snapshot.envelope_status}",
+             GREEN if snapshot.envelope_status == "FEASIBLE" else AMBER),
+            ("ZONE MPC • EXECUTION", target, snapshot.command_color),
+        )
+        box_w = min(720.0, width - 2 * pad)
+        row_h = 46.0
+        for index, (name, detail, color) in enumerate(stages):
+            y = top - 46 - index * (row_h + 16)
+            draw_panel(left + pad + box_w / 2.0, y, box_w, row_h,
+                       fill=(28, 28, 35), fill_alpha=230, edge=EDGE_SOFT,
+                       edge_width=1, accent=color, accent_width=5)
+            self._t(f"present_arch_name_{index}", name, left + pad + 18, y + 8,
+                     13, TEXT, bold=True)
+            self._t(f"present_arch_detail_{index}", detail, left + pad + 18, y - 9,
+                     10, MUTED)
+            if index < len(stages) - 1:
+                self._t(f"present_arch_arrow_{index}", "↓",
+                         left + pad + box_w / 2.0, y - row_h / 2.0 - 8, 12, EDGE,
+                         bold=True, anchor_x="center")
+        self._t("present_arch_note",
+                 "EACH LEVEL REPLANS ON ITS OWN CLOCK",
+                 left + pad, bottom + 66, 10, ELECTRIC, bold=True)
+
+    def draw(self, window: Any, controller: JudgePresentController,
+             snapshot: Optional[JudgeModeSnapshot] = None, branch: Any = None,
+             visible: bool = True) -> None:
+        if not visible or not controller.visible:
+            self.action_rects = []
+            self.page_rects = []
+            return
+        cards = available_present_cards(branch)
+        controller.select(controller.index, len(cards))
+        index = controller.index
+        card = cards[index]
+        bounds = self.layout_bounds(window.width, window.height)
+        left, bottom, width, height = (
+            bounds.left, bounds.bottom, bounds.width, bounds.height
+        )
+        right, top = bounds.right, bounds.top
+        pad = 34.0
+        self.action_rects = []
+        self.page_rects = []
+
+        arcade.draw_rect_filled(
+            arcade.XYWH(window.width / 2.0, window.height / 2.0,
+                        window.width, window.height),
+            (0, 0, 0, 180),
+        )
+        accent = (AMBER if branch is not None and getattr(branch, "outcomes", ())
+                  else ELECTRIC)
+        draw_panel(left + width / 2.0, bottom + height / 2.0, width, height,
+                   fill=PANEL, fill_alpha=250, edge=ELECTRIC, edge_width=1,
+                   accent=accent, accent_width=7)
+
+        total_laps = getattr(window, "total_laps", "-") or "-"
+        driver = snapshot.driver if snapshot else "-"
+        position = snapshot.position if snapshot else "-"
+        lap = snapshot.lap if snapshot else "-"
+        command = snapshot.command_label if snapshot else "-"
+        command_color = snapshot.command_color if snapshot else MUTED
+        confidence = snapshot.confidence if snapshot else 0.0
+
+        self._t("present_driver",
+                 f"{driver}   P{position}   •   LAP {lap}/{total_laps}",
+                 left + pad, top - 28, 13, MUTED, bold=True)
+        self._t("present_command", command, left + width * 0.48, top - 32, 24,
+                 command_color, bold=True, anchor_x="center")
+        self._t("present_page", f"{index + 1} / {len(cards)}", right - pad,
+                 top - 28, 13, MUTED, bold=True, anchor_x="right")
+        self._t("present_confidence", f"{confidence * 100:.0f}% confidence",
+                 right - pad, top - 52, 11, TEXT, bold=True, anchor_x="right")
+        self._t("present_mode",
+                 "COUNTERFACTUAL SIMULATION" if branch is not None
+                 and getattr(branch, "outcomes", ()) else "REAL TELEMETRY REPLAY",
+                 left + pad, top - 52, 11, accent, bold=True)
+        arcade.draw_rect_filled(
+            arcade.XYWH(left + width / 2.0, top - 70, width - 2 * pad, 1),
+            EDGE_SOFT,
+        )
+
+        rail_left = left + pad
+        rail_width = width - 2 * pad
+        gap = 6.0
+        segment_width = (rail_width - gap * (len(cards) - 1)) / max(1, len(cards))
+        for seg_index in range(len(cards)):
+            segment_left = rail_left + seg_index * (segment_width + gap)
+            arcade.draw_rect_filled(
+                arcade.XYWH(segment_left + segment_width / 2.0, top - 82,
+                            segment_width, 5),
+                ELECTRIC if seg_index == index else EDGE_SOFT,
+            )
+            self.page_rects.append((seg_index, segment_left, top - 96,
+                                    segment_left + segment_width, top - 70))
+
+        body_top = top - 112
+        if snapshot is None:
+            self._t("present_empty", "SELECT A DRIVER TO POPULATE THE PRESENTATION",
+                     left + pad, body_top - 40, 16, TEXT, bold=True)
+        elif card == "recommendation":
+            self._draw_recommendation(snapshot, left, bottom, width, body_top, pad)
+        elif card == "belief":
+            self._draw_belief(snapshot, left, bottom, width, body_top, pad)
+        elif card == "why":
+            self._draw_why(snapshot, left, bottom, width, body_top, pad)
+        elif card == "alternatives":
+            self._draw_alternatives(snapshot, left, bottom, width, body_top, pad)
+        elif card == "counterfactual" and branch is not None:
+            self._draw_counterfactual(branch, left, bottom, width, body_top, pad)
+        else:
+            self._draw_architecture(snapshot, left, bottom, width, body_top, pad)
+
+        footer_y = bottom + 26
+        self._button("prev", "←  PREVIOUS", left + pad, footer_y, 140.0)
+        self._button("next", "NEXT  →", right - pad - 140.0, footer_y, 140.0,
+                     color=(0, 95, 115))
+        self._t("present_hint",
+                 "V CLOSE   •   ← →  PAGE   •   5–0  SCENARIOS   •   C  FORK",
+                 left + width / 2.0, footer_y + 15.0, 9, MUTED, bold=True,
+                 anchor_x="center")
+
+    def hit_test(self, x: float, y: float) -> Optional[str]:
+        """Return a presentation action from the most recent draw."""
+        for action, left, bottom, right, top in self.action_rects:
+            if self._contains((left, bottom, right, top), x, y):
+                return action
+        for page, left, bottom, right, top in self.page_rects:
+            if self._contains((left, bottom, right, top), x, y):
+                return f"page:{page}"
+        return None
 
 
 @dataclass(frozen=True)

@@ -30,8 +30,11 @@ from src.judge_mode import (
     JudgeModeController,
     JudgeModeModel,
     JudgeModePanel,
+    JudgePresentController,
+    JudgePresentPanel,
     JudgeWalkthroughController,
     JudgeWalkthroughPanel,
+    available_present_cards,
     build_bookmarks,
     build_scenario_bookmarks,
     build_walkthrough_steps,
@@ -101,6 +104,8 @@ class F1RaceReplayWindow(arcade.Window):
             )
         )
         self.judge_walkthrough_panel = JudgeWalkthroughPanel()
+        self.judge_present_controller = JudgePresentController()
+        self.judge_present_panel = JudgePresentPanel()
         self._judge_hint_age_s = 0.0
         self._judge_snapshot = None
         self._counterfactual_branch = None
@@ -1550,6 +1555,9 @@ class F1RaceReplayWindow(arcade.Window):
             popup = getattr(self, "controls_popup_comp", None)
             if popup is not None:
                 popup.hide()
+            present = getattr(self, "judge_present_controller", None)
+            if present is not None:
+                present.close()
             branch = getattr(self, "_counterfactual_branch", None)
             if branch is None and getattr(self, "judge_bookmarks", ()):
                 active = getattr(self.judge_mode_controller, "active_index", None)
@@ -1560,6 +1568,39 @@ class F1RaceReplayWindow(arcade.Window):
                     walkthrough.select_for_bookmark(active)
         self._refresh_decision_layout()
         return visible
+
+    def _present_card_count(self) -> int:
+        branch = getattr(self, "_counterfactual_branch", None)
+        return len(available_present_cards(branch))
+
+    def _toggle_judge_present(self) -> bool:
+        """Open/close the full-screen decision presentation while paused."""
+        controller = getattr(self, "judge_present_controller", None)
+        if controller is None:
+            return False
+        visible = controller.toggle()
+        if visible:
+            self.paused = True
+            popup = getattr(self, "controls_popup_comp", None)
+            if popup is not None:
+                popup.hide()
+            walkthrough = getattr(self, "judge_walkthrough_controller", None)
+            if walkthrough is not None:
+                walkthrough.close()
+        self._refresh_decision_layout()
+        return visible
+
+    def _step_judge_present(self, direction: int) -> None:
+        controller = getattr(self, "judge_present_controller", None)
+        if controller is None or not controller.visible:
+            return
+        controller.step(direction, self._present_card_count())
+
+    def _select_judge_present_page(self, index: int) -> None:
+        controller = getattr(self, "judge_present_controller", None)
+        if controller is None:
+            return
+        controller.select(index, self._present_card_count())
 
     def _launch_counterfactual(self):
         """Evaluate actions in isolated simulators from the selected public state."""
@@ -2333,7 +2374,19 @@ class F1RaceReplayWindow(arcade.Window):
                         and walkthrough.first_run_hint_visible
                     ),
                 )
-                    
+
+        # Full-screen presentation carousel sits above every other surface.
+        present = getattr(self, "judge_present_controller", None)
+        present_panel = getattr(self, "judge_present_panel", None)
+        if present is not None and present_panel is not None:
+            present_panel.draw(
+                self,
+                present,
+                snapshot=self._judge_snapshot,
+                branch=self._counterfactual_branch,
+                visible=getattr(self, "visible_hud", True),
+            )
+
     def on_update(self, delta_time: float):
         self.race_controls_comp.on_update(delta_time)
 
@@ -2380,9 +2433,16 @@ class F1RaceReplayWindow(arcade.Window):
                 walkthrough = getattr(self, "judge_walkthrough_controller", None)
                 if walkthrough is not None and walkthrough.visible:
                     walkthrough.close()
+                present = getattr(self, "judge_present_controller", None)
+                if present is not None and present.visible:
+                    present.close()
             self._broadcast_telemetry_state()
             self.race_controls_comp.flash_button('play_pause')
         elif symbol == arcade.key.RIGHT:
+            present = getattr(self, "judge_present_controller", None)
+            if present is not None and present.visible:
+                self._step_judge_present(1)
+                return
             if getattr(getattr(self, "judge_walkthrough_controller", None),
                        "visible", False):
                 self._step_judge_walkthrough(1)
@@ -2392,6 +2452,10 @@ class F1RaceReplayWindow(arcade.Window):
             self.is_forwarding = True
             self.paused = True
         elif symbol == arcade.key.LEFT:
+            present = getattr(self, "judge_present_controller", None)
+            if present is not None and present.visible:
+                self._step_judge_present(-1)
+                return
             if getattr(getattr(self, "judge_walkthrough_controller", None),
                        "visible", False):
                 self._step_judge_walkthrough(-1)
@@ -2439,6 +2503,10 @@ class F1RaceReplayWindow(arcade.Window):
             # Race Engineer HUD without changing any inference state.
             self.judge_mode_controller.toggle()
             self._refresh_decision_layout()
+        elif symbol == arcade.key.V:
+            # Full-screen presentation carousel: one big decision card at a
+            # time, with the driver/call/confidence pinned in the header.
+            self._toggle_judge_present()
         elif symbol == arcade.key.KEY_5:
             self._select_judge_bookmark(0)
         elif symbol == arcade.key.KEY_6:
@@ -2516,6 +2584,17 @@ class F1RaceReplayWindow(arcade.Window):
             self.paused = self.was_paused_before_hold
 
     def on_mouse_press(self, x: float, y: float, button: int, modifiers: int):
+        present = getattr(self, "judge_present_controller", None)
+        present_panel = getattr(self, "judge_present_panel", None)
+        if present is not None and present.visible and present_panel is not None:
+            action = present_panel.hit_test(x, y)
+            if action == "prev":
+                self._step_judge_present(-1)
+            elif action == "next":
+                self._step_judge_present(1)
+            elif action is not None and action.startswith("page:"):
+                self._select_judge_present_page(int(action.split(":", 1)[1]))
+            return
         walkthrough = getattr(self, "judge_walkthrough_controller", None)
         walkthrough_panel = getattr(self, "judge_walkthrough_panel", None)
         if walkthrough is not None and walkthrough.visible and walkthrough_panel is not None:

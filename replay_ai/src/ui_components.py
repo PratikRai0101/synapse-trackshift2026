@@ -1083,6 +1083,7 @@ class ControlsPopupComponent(BaseComponent):
             ("L", "Toggle Driver Labels"),
             ("F", "Toggle Focus / Battle mode"),
             ("J", "Judge / Engineer view"),
+            ("V", "Present decision (full screen)"),
             ("5-0", "Scenario bookmarks; N/P next/previous"),
             ("C", "Counterfactual action branches"),
             ("H / ?", "How It Works walkthrough"),
