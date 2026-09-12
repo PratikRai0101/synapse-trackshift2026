@@ -50,6 +50,7 @@ class EpisodeConfig:
     compound: str = "medium"
     compound_identity: str = "C4"
     initial_wear: float = 0.0
+    trace_interval_s: float = 0.2
 
 
 @dataclass
@@ -78,6 +79,7 @@ class EpisodeReport:
     contested_steps: int = 0
     ego_steps: int = 0
     saturation_counts: dict[str, int] = field(default_factory=dict)
+    trace: list[dict[str, Any]] = field(default_factory=list)
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -124,6 +126,16 @@ def build_decision_input(
         observations=list(observations or []),
         versions={"plant": "synthetic.v1", "belief": "particle.v1"},
     )
+
+
+def _belief_summary(controller: Any) -> dict[str, Any] | None:
+    belief = getattr(controller, "belief", None)
+    if belief is None:
+        return None
+    try:
+        return belief.capability_forecast()
+    except Exception:
+        return None
 
 
 class EpisodeRunner:
@@ -187,6 +199,7 @@ class EpisodeRunner:
         previous_gap: float | None = None
         previous_decision: Decision | None = None
         previous_rival_speed: float = cfg.initial_speed_mps
+        next_trace = 0.0
         since_ego_attack_s = 0.0
 
         while t < cfg.duration_s:
@@ -237,6 +250,7 @@ class EpisodeRunner:
                         "runtime_s": decision.runtime_s,
                         "search_iterations": decision.search_iterations,
                         "timed_out": decision.timed_out,
+                        "belief": _belief_summary(controller),
                     }
                 )
                 previous_gap = gap
@@ -284,6 +298,26 @@ class EpisodeRunner:
 
             report.ego_steps += 1
             t += cfg.dt_s
+
+            if t + 1e-9 >= next_trace:
+                report.trace.append(
+                    {
+                        "t": round(t, 3),
+                        "ego_s": ego.progress_m,
+                        "rival_s": rival.state.progress_m,
+                        "gap": new_gap,
+                        "ego_v": ego.speed_mps,
+                        "rival_v": rival.state.speed_mps,
+                        "p_k_w": ego_step.realized_p_k_dc_w,
+                        "energy_j": usable_energy_j(ego.battery, self.battery),
+                        "lateral_m": ego.lateral_m,
+                        "tyre_temp_k": (
+                            ego.tyres.temp_rear_k if ego.tyres is not None else None
+                        ),
+                        "outcome": outcome.value,
+                    }
+                )
+                next_trace += cfg.trace_interval_s
 
         report.final_gap_m = rival.state.progress_m - ego.progress_m
         report.ego_final_progress_m = ego.progress_m
