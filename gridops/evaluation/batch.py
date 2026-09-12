@@ -28,6 +28,7 @@ from .runner import EpisodeRunner, EpisodeReport
 from ..contracts.state import ActionFamily
 from ..decision.belief import RivalBelief
 from ..decision.hmm_belief import HMMBelief, HMMConfig
+from ..decision.hmm40 import HMMBelief40, HMM40Config
 from ..decision.planning import ConditionalConvexPlanner, PlannerConfig
 from ..decision.safety import ContactGuard
 
@@ -46,6 +47,7 @@ CONTROLLER_NAMES: tuple[str, ...] = (
     "m",
     "m_convex",
     "m_hmm",
+    "m_hmm40",
     "m_hmm_stationary",
     "m_no_continuation",
     "m_no_margin",
@@ -247,6 +249,15 @@ def build_controller(
             belief=HMMBelief(HMMConfig(stationary=False, emission_sigma_m=sigma)),
             horizon=3, iterations=300,
             contact_guard=ContactGuard(runner.track, margin_m=contact_margin_m), race_value=RaceValueMap(runner.terminal_value, LapMapConfig()), closure_fn=closure_fn, response_fn=response_fn, seed=seed,
+        )
+    if name == "m_hmm40":
+        return AmbiguityAwareController(
+            terminal_value=runner.terminal_value,
+            belief=HMMBelief40(HMM40Config(emission_sigma_mps=sigma)),
+            horizon=3, iterations=300,
+            contact_guard=ContactGuard(runner.track, margin_m=contact_margin_m),
+            race_value=RaceValueMap(runner.terminal_value, LapMapConfig()),
+            closure_fn=closure_fn, response_fn=response_fn, seed=seed,
         )
     if name == "m_hmm_stationary":
         return AmbiguityAwareController(
