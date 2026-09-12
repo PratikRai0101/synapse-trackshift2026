@@ -166,6 +166,19 @@ class RaceEngineerHUD:
         else:
             self._t("advice", report.advice.reason, left + pad, y, 11, TEXT)
 
+        metrics = getattr(report, "runtime_metrics", {}) or {}
+        if metrics:
+            soh = metrics.get("battery_soh")
+            resistance = metrics.get("battery_resistance")
+            residual = metrics.get("socp_residual")
+            status = "OK" if metrics.get("socp_feasible") else "CHECK"
+            self._t(
+                "runtime_metrics",
+                f"SOH {soh:.3f}  R {resistance:.3f}  SOCP {status} "
+                f"res {residual if residual is not None else 'n/a'}",
+                left + pad, top - 160, 9, MUTED,
+            )
+
     # -- helpers ------------------------------------------------------------
     def _draw_compliance(self, right_bound: float, y: float, report: DecisionReport) -> None:
         flags: List[Tuple[str, RGB]] = []

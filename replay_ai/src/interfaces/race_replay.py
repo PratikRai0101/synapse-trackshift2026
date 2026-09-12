@@ -1491,6 +1491,7 @@ class F1RaceReplayWindow(arcade.Window):
             )
             report.rival_hmm = self.motorsport_intelligence.last_hmm
             report.lap_plan = self.motorsport_intelligence.last_lap_plan
+            report.runtime_metrics = self.motorsport_intelligence.runtime_metrics()
         return report
 
     def update_scaling(self, screen_w, screen_h):

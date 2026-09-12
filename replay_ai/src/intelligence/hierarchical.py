@@ -282,6 +282,26 @@ class MotorsportIntelligence:
                 self.lap_planner = None
         self.last_hmm: HMMResult | None = None
         self.last_level2 = None
+        self._runtime_battery_soh = 1.0
+        self._runtime_battery_temperature = 70.0
+
+    def runtime_metrics(self) -> dict:
+        """Serializable diagnostics consumed by the runtime HUD/API."""
+        soh = self._runtime_battery_soh
+        soh_decision = self.last_soh_decision
+        envelope = getattr(self.last_level2, "envelope", None)
+        return {
+            "battery_soh": soh,
+            "battery_resistance": (soh_decision.resistance if soh_decision else
+                                    1.0 + (1.0 - soh) * 0.4),
+            "battery_wear_cost": soh_decision.wear_cost if soh_decision else 0.0,
+            "lap_target_energy": (self.last_lap_plan[0].deploy_energy
+                                   if self.last_lap_plan else None),
+            "socp_feasible": envelope.feasible if envelope else None,
+            "socp_residual": getattr(envelope, "max_residual", None) if envelope else None,
+            "scenario_values": (dict(self.last_level2.search_values)
+                                 if self.last_level2 else {}),
+        }
 
     def plan_lap(self, lap: int, energy: float, tyre_wear: float = 0.0,
                  battery_soh: float = 1.0, battery_temperature: float = 70.0):
@@ -305,6 +325,8 @@ class MotorsportIntelligence:
                 own_soc: float = 70.0, gap_s: float | None = None,
                 battery_soh: float = 1.0,
                 battery_temperature: float = 70.0) -> TacticalDecision:
+        self._runtime_battery_soh = float(battery_soh)
+        self._runtime_battery_temperature = float(battery_temperature)
         if self.lap_planner is not None:
             self.plan_lap(observation.lap, own_soc, observation.tyre_life,
                           battery_soh, battery_temperature)

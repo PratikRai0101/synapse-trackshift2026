@@ -50,6 +50,7 @@ class DecisionReport:
     # the legacy report depend on the inference implementation.
     tactical: Any = None
     rival_hmm: Any = None
+    runtime_metrics: Dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> Dict[str, Any]:
         return {
@@ -64,6 +65,7 @@ class DecisionReport:
                 "ers_probabilities": dict(self.rival_hmm.ers_probabilities),
                 "most_likely_state": tuple(x.value for x in self.rival_hmm.most_likely_state),
             } if self.rival_hmm else None),
+            "runtime_metrics": dict(self.runtime_metrics),
         }
 
 
