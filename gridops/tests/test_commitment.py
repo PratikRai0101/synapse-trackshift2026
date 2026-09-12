@@ -18,6 +18,9 @@ from gridops.decision.commitment import (
     NoProgressGuard,
     ReserveGuard,
     conservative_improvement,
+    cvar_improvement,
+    minimax_regret,
+    regret_by_action,
     should_commit,
 )
 from gridops.race_value.lap_map import (
@@ -144,6 +147,47 @@ def test_futile_budget_exhaustion_blocks_new_commitments() -> None:
     ledger.tick(now_s=1.5, position_delta_m=0.0)
     second = Commitment("b", ActionFamily.ATTACK_NOW, "pass", 0.0, 2.0, 3.0, 10.0)
     assert not ledger.open(second)
+
+
+def test_cvar_is_more_conservative_than_the_mean() -> None:
+    reference = [0.0, 0.0, 0.0, 0.0, 0.0]
+    candidate = [1.0, 0.5, 0.0, -0.2, -1.0]
+    mean = sum(r - c for r, c in zip(reference, candidate)) / len(reference)
+    cvar = cvar_improvement(reference, candidate, alpha=0.2)
+    assert cvar < mean
+    assert cvar == pytest.approx(-1.0)
+
+
+def test_cvar_with_full_alpha_equals_the_mean() -> None:
+    reference = [0.0, 0.0, 0.0]
+    candidate = [1.0, 0.0, -1.0]
+    mean = sum(r - c for r, c in zip(reference, candidate)) / 3
+    assert cvar_improvement(reference, candidate, alpha=1.0) == pytest.approx(mean)
+
+
+def test_cvar_rejects_bad_alpha() -> None:
+    with pytest.raises(ValueError):
+        cvar_improvement([0.0], [0.0], alpha=0.0)
+
+
+def test_minimax_regret_selects_the_lowest_worst_regret() -> None:
+    # under h0 action A is best; under h1 action B is best. C is mediocre in both.
+    costs = {
+        "A": [0.0, 10.0],
+        "B": [10.0, 0.0],
+        "C": [4.0, 4.0],
+    }
+    best, worst = minimax_regret(costs)
+    assert best == "C"
+    assert worst["C"] == pytest.approx(4.0)
+    assert worst["A"] == pytest.approx(10.0)
+
+
+def test_regret_is_zero_for_the_best_action_per_hypothesis() -> None:
+    costs = {"A": [0.0, 5.0], "B": [5.0, 0.0]}
+    regret = regret_by_action(costs)
+    assert regret["A"][0] == pytest.approx(0.0)
+    assert regret["B"][1] == pytest.approx(0.0)
 
 
 # --------------------------------------------------------------------------

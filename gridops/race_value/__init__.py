@@ -1,6 +1,9 @@
 """Remaining-race and lifecycle resource value."""
 
 from .lap_map import (
+    LapMapConfig,
+    RaceValueMap,
+    RaceValueQuery,
     ReserveBand,
     TerminalValue,
     default_terminal_value,
@@ -8,6 +11,9 @@ from .lap_map import (
 )
 
 __all__ = [
+    "LapMapConfig",
+    "RaceValueMap",
+    "RaceValueQuery",
     "ReserveBand",
     "TerminalValue",
     "default_terminal_value",

@@ -10,6 +10,9 @@ from .commitment import (
     NoProgressGuard,
     ReserveGuard,
     conservative_improvement,
+    cvar_improvement,
+    minimax_regret,
+    regret_by_action,
     should_commit,
 )
 from .pomcp import POMCP, GenerativeModel, SearchResult
@@ -26,6 +29,9 @@ __all__ = [
     "NoProgressGuard",
     "ReserveGuard",
     "conservative_improvement",
+    "cvar_improvement",
+    "minimax_regret",
+    "regret_by_action",
     "should_commit",
     "POMCP",
     "GenerativeModel",
