@@ -1,0 +1,9 @@
+{
+  "name": "@f1-viewer3d/bridge",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run index.ts",
+    "mock": "bun run mock.ts"
+  }
+}
