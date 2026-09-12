@@ -12,11 +12,15 @@ def _write_dataset(tmp_path, events=8, samples=60, seed=5):
     return dataset, rows
 
 
+def _artifact(path, means, sigma, counts, transition):
+    path.write_text(json.dumps({"means": means, "sigma": sigma,
+                                "counts": counts, "transition": transition}))
+
+
 def test_calibrated_hmm_evaluation_reports_confusion(tmp_path):
     dataset, rows = _write_dataset(tmp_path)
     artifact = tmp_path / "artifact.json"
-    means, sigma, counts = fit(dataset)
-    artifact.write_text(json.dumps({"means": means, "sigma": sigma, "counts": counts}))
+    _artifact(artifact, *fit(dataset))
     report = evaluate(dataset, artifact)
     assert report["samples"] == len(rows)
     assert 0.0 <= report["accuracy"] <= 1.0
@@ -24,29 +28,23 @@ def test_calibrated_hmm_evaluation_reports_confusion(tmp_path):
 
 
 def test_fitted_scale_beats_uncalibrated_sigma(tmp_path):
-    """A single scalar sigma leaves the likelihood flat; fitted scales must win.
-
-    This guards the fix for the flat-likelihood defect: with ``sigma=1.0`` every
-    feature error is ~0.01-0.3, so all 40 states score within a few percent of
-    each other and the filter just re-predicts its prior.
-    """
     dataset, _ = _write_dataset(tmp_path, events=10, samples=60, seed=3)
-    means, sigma, counts = fit(dataset)
     artifact = tmp_path / "artifact.json"
-    artifact.write_text(json.dumps({"means": means, "sigma": sigma, "counts": counts}))
+    _artifact(artifact, *fit(dataset))
     calibrated = evaluate(dataset, artifact)["accuracy"]
     uncalibrated = evaluate(dataset, None)["accuracy"]
     assert calibrated > uncalibrated
-    # The critical pair is the decision that matters: trap vs genuine attack.
     assert evaluate(dataset, artifact)["harvest_vs_derate_accuracy"] > 0.8
 
 
-def test_fit_returns_pooled_per_feature_scale(tmp_path):
+def test_fit_returns_scales_and_transition_matrix(tmp_path):
     dataset, _ = _write_dataset(tmp_path)
-    means, sigma, counts = fit(dataset)
+    means, sigma, counts, transition = fit(dataset)
     assert set(sigma) == {"dgap", "throttle_clip", "brake_delta"}
     assert all(value > 0.0 for value in sigma.values())
-    # Metadata must not leak into the emission means the filter consumes.
     for values in means.values():
         assert set(values) == {"dgap", "throttle_clip", "brake_delta"}
     assert sum(counts.values()) == 8 * 60
+    assert set(transition) == {"H", "M", "Lharvest", "Lderate"}
+    assert all(abs(sum(row.values()) - 1.0) < 1e-9
+               for row in transition.values())

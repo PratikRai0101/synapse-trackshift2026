@@ -116,7 +116,8 @@ class FortyStateHMM:
 
     def __init__(self, self_transition: float = 0.92, sigma: float = 1.0,
                  emission_means: Mapping[str, Mapping[str, float]] | None = None,
-                 emission_sigma: Mapping[str, float] | None = None) -> None:
+                 emission_sigma: Mapping[str, float] | None = None,
+                 mode_transition: Mapping[str, Mapping[str, float]] | None = None) -> None:
         self.sigma = max(1e-6, float(sigma))
         self.self_transition = max(0.0, min(1.0, float(self_transition)))
         self._belief: Dict[HMMState, float] = {s: 1.0 / len(STATES) for s in STATES}
@@ -126,6 +127,9 @@ class FortyStateHMM:
         # flat across modes because feature errors are small (~0.01-0.3), so
         # calibrated scales are required for the filter to discriminate at all.
         self.emission_sigma = dict(emission_sigma or {})
+        self.mode_transition = {
+            mode: dict(row) for mode, row in (mode_transition or {}).items()
+        }
 
     @classmethod
     def from_artifact(cls, path: str, **kwargs) -> "FortyStateHMM":
@@ -138,6 +142,7 @@ class FortyStateHMM:
         clean = {mode: {key: value for key, value in values.items() if key in keep}
                  for mode, values in means.items()}
         kwargs.setdefault("emission_sigma", artifact.get("sigma") or None)
+        kwargs.setdefault("mode_transition", artifact.get("transition") or None)
         return cls(emission_means=clean, **kwargs)
 
     def observe(self, observation: RivalTelemetry) -> HMMResult:
@@ -170,8 +175,18 @@ class FortyStateHMM:
     def update(self, features: RivalFeatures) -> HMMResult:
         n = len(STATES)
         switch = (1.0 - self.self_transition) / (n - 1)
-        predicted = {s: sum(self._belief[p] * (self.self_transition if p == s else switch)
-                            for p in STATES) for s in STATES}
+
+        def transition(previous: HMMState, current: HMMState) -> float:
+            if self.mode_transition:
+                row = self.mode_transition.get(previous[0].value, {})
+                mode_probability = row.get(current[0].value, 0.0)
+                # Override and tyre are not labelled by public telemetry here;
+                # distribute their transition mass uniformly.
+                return mode_probability / (len(OverrideMode) * len(TyreState))
+            return self.self_transition if previous == current else switch
+
+        predicted = {s: sum(self._belief[p] * transition(p, s) for p in STATES)
+                     for s in STATES}
         likelihood: Dict[HMMState, float] = {}
         # Diagonal Gaussian per feature. Scale falls back to the scalar sigma
         # for any feature the artifact did not supply.
