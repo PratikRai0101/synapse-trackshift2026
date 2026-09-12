@@ -95,6 +95,18 @@ Run from inside this directory.
   data/synthetic-labelled.jsonl --artifact artifacts/hmm-emissions.json
 ```
 
+Held-out event evaluation (fit only on train events):
+
+```sh
+.venv/bin/python scripts/evaluate_hmm_splits.py \
+  data/synthetic-labelled.jsonl --output artifacts/hmm-split-report.json
+```
+
+The report keeps events, not rows, in separate partitions. On a 100-event
+synthetic mixture, the current reference run produced 67 train, 21 validation
+and 12 test events with overall accuracy 0.821 / 0.802 / 0.771. These are
+synthetic results, not real-race validation.
+
 Real telemetry export, and the leakage-safe event split:
 
 ```sh
