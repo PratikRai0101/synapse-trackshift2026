@@ -7,7 +7,7 @@ imported here.
 
 ## What is built and passing
 
-135 passing, 1 xfailed (`python -m pytest`). See `gridops/README.md` for the module table.
+139 passing, 1 xfailed (`python -m pytest`). See `gridops/README.md` for the module table.
 
 Working and verified:
 
@@ -122,6 +122,23 @@ Read this honestly:
   as recorded in limitation 2.
 
 
+## Held-out split (10 seeds x 5 policies)
+
+`python -m gridops.cli batch configs/scenario_synthetic.json --seeds 10 --split test`
+
+| split | controller | median gap m | mean energy J | contacts |
+|---|---|---:|---:|---:|
+| development | reference | 47.86 | 125 023 | 0 |
+| development | **M** | **8.09** | 1 635 114 | **0** |
+| test (shifted physics) | reference | 65.00 | 125 032 | 0 |
+| test (shifted physics) | stationary | 0.29 | 2 161 295 | 6 110 |
+| test (shifted physics) | **M** | **31.48** | 1 792 644 | **1 320** |
+
+M still beats the reference on position and remains the most frugal engaging
+controller, but **its contact avoidance does not transfer**. The controller's
+models are calibrated on development, which is the correct held-out procedure;
+the failure is a model-error margin problem, not a leak.
+
 ## Known limitations (do not hide these)
 
 1. **Belief calibration is improved; one genuine ambiguity remains.** The
@@ -168,15 +185,17 @@ Read this honestly:
    profile and the plant's realized trajectory are not yet compared in the
    episode record.
 
-8. **Contact is now a hard feasibility check for M.** The contact supervisor
-   (`decision/safety.py`) projects both cars forward and caps the committed
-   target speed so the ego cannot close into the rival before lateral separation
-   exists; deployment is scaled to the capped gain so energy is not wasted. M's
-   modeled contacts fell from 1 086 to **0** over the 3-seed batch. The
-   `m_no_belief` variant still contacts (170 frames) because the supervisor
-   projects the rival at its *observed* speed, so a defending rival that
-   accelerates can close faster than predicted. Next fix: project the rival at
-   the worst retained policy's speed, not the observed speed.
+8. **Contact avoidance does not transfer to shifted physics.** The contact
+   supervisor (`decision/safety.py`) drives M's modeled contacts to 0 on the
+   development split, but the held-out `test` split (higher resistance, lower
+   grip, heavier car, faster-wearing tyres, quicker rival) produces **1 320**
+   contacts with M. The supervisor projects the rival at its observed speed and
+   its limits were validated on development physics, so a shifted plant closes
+   faster than predicted. Fix: add a declared model-error margin to the
+   projection, or project the rival at the worst retained policy's speed under a
+   clearance buffer. **Until then, do not present contact avoidance as a
+   transferable safety property.** The generated bundle records this as
+   `not met on the held-out split`.
 
 ## Next slices, by owner
 

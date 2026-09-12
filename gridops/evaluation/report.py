@@ -21,13 +21,36 @@ RULES_EVIDENCE = "tests/test_rules.py (unknown permission disables the restricte
 
 
 def build_bundle(batches: list[dict[str, Any]]) -> dict[str, Any]:
-    """Merge one or more batch payloads into a pitch bundle."""
+    """Merge batch payloads into a pitch bundle, grouped by split."""
     rows: list[dict[str, Any]] = []
     manifests: list[dict[str, Any]] = []
     for batch in batches:
         manifests.append(batch.get("manifest", {}))
         rows.extend(batch.get("rows", []))
 
+    splits: list[str] = []
+    for row in rows:
+        split = row.get("split") or "unspecified"
+        if split not in splits:
+            splits.append(split)
+
+    aggregate_by_split: dict[str, list[dict[str, Any]]] = {}
+    for split in splits:
+        subset = [r for r in rows if (r.get("split") or "unspecified") == split]
+        aggregate_by_split[split] = _aggregate(subset)
+
+    merged = aggregate_by_split.get("development") or next(iter(aggregate_by_split.values()), [])
+    return {
+        "manifests": manifests,
+        "aggregate_by_split": aggregate_by_split,
+        "aggregate": merged,
+        "claim_ledger": claim_ledger(merged),
+        "split_claims": split_claims(aggregate_by_split),
+        "limitations": limitations(),
+    }
+
+
+def _aggregate(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     controllers: list[str] = []
     for row in rows:
         if row["controller"] not in controllers:
@@ -58,13 +81,37 @@ def build_bundle(batches: list[dict[str, Any]]) -> dict[str, Any]:
                 "total_catch_ups": sum(catches) if catches else 0,
             }
         )
+    return aggregate
 
-    return {
-        "manifests": manifests,
-        "aggregate": aggregate,
-        "claim_ledger": claim_ledger(aggregate),
-        "limitations": limitations(),
-    }
+
+def split_claims(
+    aggregate_by_split: dict[str, list[dict[str, Any]]]
+) -> list[dict[str, Any]]:
+    """Compare the method across splits; a gap here is a finding, not a bug."""
+    out: list[dict[str, Any]] = []
+    development = aggregate_by_split.get("development")
+    test = aggregate_by_split.get("test")
+    if not development or not test:
+        return out
+    dev_m = _find(development, "m")
+    test_m = _find(test, "m")
+    if dev_m and test_m:
+        out.append(
+            {
+                "claim": "M's contact avoidance transfers to shifted physics",
+                "evidence": (
+                    f"development {dev_m['total_contacts']} contacts vs "
+                    f"test {test_m['total_contacts']} contacts "
+                    f"(median gap {dev_m['median_final_gap_m']} vs {test_m['median_final_gap_m']} m)"
+                ),
+                "status": (
+                    "supported"
+                    if dev_m["total_contacts"] == 0 and test_m["total_contacts"] == 0
+                    else "not met on the held-out split"
+                ),
+            }
+        )
+    return out
 
 
 def _find(aggregate: list[dict[str, Any]], name: str) -> dict[str, Any] | None:
@@ -220,16 +267,27 @@ def render_markdown(bundle: dict[str, Any]) -> str:
             f"- batch `{manifest.get('manifest_id')}` split `{manifest.get('split')}` "
             f"seeds {manifest.get('seeds')} policies {manifest.get('rival_policies')}"
         )
-    lines += ["", "## Aggregate", "", "| controller | completed | median gap m | mean energy J | passes | contacts | catch-ups |", "|---|---:|---:|---:|---:|---:|---:|"]
-    for row in bundle["aggregate"]:
-        lines.append(
-            f"| {row['controller']} | {row['completed']}/{row['episodes']} | "
-            f"{row['median_final_gap_m']} | {row['mean_energy_spent_j']} | "
-            f"{row['total_passes']} | {row['total_contacts']} | {row['total_catch_ups']} |"
-        )
+    for split, aggregate in bundle.get("aggregate_by_split", {}).items():
+        lines += [
+            "",
+            f"## Aggregate — `{split}` split",
+            "",
+            "| controller | completed | median gap m | mean energy J | passes | contacts | catch-ups |",
+            "|---|---:|---:|---:|---:|---:|---:|",
+        ]
+        for row in aggregate:
+            lines.append(
+                f"| {row['controller']} | {row['completed']}/{row['episodes']} | "
+                f"{row['median_final_gap_m']} | {row['mean_energy_spent_j']} | "
+                f"{row['total_passes']} | {row['total_contacts']} | {row['total_catch_ups']} |"
+            )
     lines += ["", "## Claim ledger", ""]
     for claim in bundle["claim_ledger"]:
         lines.append(f"- **[{claim['status']}]** {claim['claim']} — {claim['evidence']}")
+    if bundle.get("split_claims"):
+        lines += ["", "## Split comparisons", ""]
+        for claim in bundle["split_claims"]:
+            lines.append(f"- **[{claim['status']}]** {claim['claim']} — {claim['evidence']}")
     lines += ["", "## Limitations", ""]
     for item in bundle["limitations"]:
         lines.append(f"- {item}")

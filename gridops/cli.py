@@ -31,10 +31,17 @@ from .evaluation.calibration import calibrate
 from .evaluation.report import build_bundle, render_markdown
 from .evaluation.runner import EpisodeConfig, EpisodeRunner
 from .race_value.lap_map import default_terminal_value
-from .simulation.rivals import RivalPolicy
+from .simulation.rivals import RivalPolicy, RivalPolicyConfig
 from .simulation.track import synthetic_circuit
 from .simulation.tyres import default_tyre_params
 from .contracts.ruleset import default_ruleset
+from .evaluation.splits import (
+    apply_battery,
+    apply_rival,
+    apply_tyres,
+    apply_vehicle,
+    split_override,
+)
 
 REQUIRED_KEYS = (
     "schema_version",
@@ -129,9 +136,11 @@ def _controller(name: str, runner: EpisodeRunner, seed: int) -> Controller:
     raise ValueError(f"unknown controller: {name}")
 
 
-def _build_runner(data: dict[str, Any]) -> EpisodeRunner:
-    battery = BatteryParams(**data.get("battery", {}))
-    vehicle = VehicleParams(**data.get("vehicle", {}))
+def _build_runner(data: dict[str, Any], split: str = "development") -> EpisodeRunner:
+    override = split_override(split)
+    battery = apply_battery(BatteryParams(**data.get("battery", {})), override)
+    vehicle = apply_vehicle(VehicleParams(**data.get("vehicle", {})), override)
+    tyre_params = apply_tyres(default_tyre_params(), override)
     config = EpisodeConfig(
         duration_s=data["duration_s"],
         dt_s=data["dt_s"],
@@ -152,8 +161,9 @@ def _build_runner(data: dict[str, Any]) -> EpisodeRunner:
         battery=battery,
         terminal_value=default_terminal_value(battery),
         config=config,
-        tyre_params=default_tyre_params(),
+        tyre_params=tyre_params,
         rules=default_ruleset(),
+        rival_config=apply_rival(RivalPolicyConfig(), override),
     )
 
 
@@ -192,6 +202,10 @@ def main(argv: list[str] | None = None) -> int:
     batch.add_argument("path")
     batch.add_argument("--seeds", type=int, default=5)
     batch.add_argument("--split", default="development")
+    batch.add_argument(
+        "--calibrate-split", default=None,
+        help="split used to fit the controller's models (default: split's own)",
+    )
     batch.add_argument("--controllers", default=None, help="comma-separated")
     batch.add_argument("--policies", default=None, help="comma-separated")
     batch.add_argument("--no-calibrate", action="store_true")
@@ -246,10 +260,13 @@ def main(argv: list[str] | None = None) -> int:
         data = json.loads(Path(args.path).read_text())
         calibration = None
         if not args.no_calibrate:
-            probe = _build_runner(data)
+            override = split_override(args.split)
+            calibration_split = args.calibrate_split or override.calibration_split
+            probe = _build_runner(data, calibration_split)
             calibration = calibrate(
                 probe.track, probe.vehicle, probe.battery,
-                tyre_params=default_tyre_params(),
+                tyre_params=probe.tyre_params,
+                rival_config=probe.rival_config,
             )
         controllers = (
             tuple(args.controllers.split(",")) if args.controllers else ABLATION_NAMES
@@ -261,7 +278,7 @@ def main(argv: list[str] | None = None) -> int:
             controllers=controllers,
             policies=policies,
         )
-        result = run_batch(manifest, lambda: _build_runner(data), calibration)
+        result = run_batch(manifest, lambda: _build_runner(data, args.split), calibration)
         payload = result.to_dict()
         if args.out:
             Path(args.out).write_text(json.dumps(payload, indent=2))
