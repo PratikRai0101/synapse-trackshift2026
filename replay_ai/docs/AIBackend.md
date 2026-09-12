@@ -128,6 +128,20 @@ one race cannot leak across train/validation/test. Records carry
 `timestamp_s` and `available_at_s`; the adapter refuses to emit a frame whose
 `available_at_s` precedes its `timestamp_s`.
 
+For Level 3 lap-time data, use the equivalent event-level pipeline:
+
+```sh
+.venv/bin/python scripts/build_lap_dataset.py \
+  --input bahrain=cache/bahrain.pkl --input monaco=cache/monaco.pkl \
+  --driver HAM --output data/ham-laps
+
+.venv/bin/python scripts/evaluate_lap_map.py data/ham-laps
+```
+
+The lap map is fitted only on training-race laps and scored with held-out-race
+MAE. Battery and fuel fields remain explicit pedal-derived proxies until they
+are replaced with simulator-labelled energy states.
+
 ## Measured behaviour
 
 On synthetic labelled data, and on **held-out** data drawn from the same
