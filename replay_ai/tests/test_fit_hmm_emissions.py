@@ -15,7 +15,8 @@ def test_fit_uses_only_labelled_records(tmp_path):
          "brake": 0, "gap_s": 0.7},
     ]
     source.write_text("\n".join(json.dumps(row) for row in rows))
-    means, sigma, counts = fit(source)
+    means, sigma, counts, transition = fit(source)
     assert counts == {"Lderate": 2}
     assert "H" not in means
     assert set(sigma) == {"dgap", "throttle_clip", "brake_delta"}
+    assert all(abs(sum(row.values()) - 1.0) < 1e-9 for row in transition.values())

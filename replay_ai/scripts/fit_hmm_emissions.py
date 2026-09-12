@@ -38,6 +38,8 @@ def fit(path: Path):
     counts = defaultdict(int)
     sums = defaultdict(lambda: [0.0, 0.0, 0.0])
     sumsq = defaultdict(lambda: [0.0, 0.0, 0.0])
+    transition_counts = defaultdict(lambda: defaultdict(int))
+    previous_labels = {}
     extractors = {}
     with path.open() as source:
         for line in source:
@@ -60,6 +62,10 @@ def fit(path: Path):
                 lap=record.get("lap", 0),
             ))
             counts[label] += 1
+            previous = previous_labels.get(event)
+            if previous is not None:
+                transition_counts[previous][label] += 1
+            previous_labels[event] = label
             for i, value in enumerate(_feature_vector(features)):
                 sums[label][i] += value
                 sumsq[label][i] += value * value
@@ -89,7 +95,16 @@ def fit(path: Path):
 
     clean_means = {label: {name: values[name] for name in FEATURES}
                    for label, values in means.items()}
-    return clean_means, pooled, counts
+    # Laplace smoothing keeps every mode reachable in a small development set.
+    modes = [mode.value for mode in ERSMode]
+    transition = {}
+    for previous in modes:
+        total = sum(transition_counts[previous][current] + 1 for current in modes)
+        transition[previous] = {
+            current: (transition_counts[previous][current] + 1) / total
+            for current in modes
+        }
+    return clean_means, pooled, counts, transition
 
 
 def main() -> None:
@@ -97,13 +112,14 @@ def main() -> None:
     parser.add_argument("dataset", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    means, sigma, counts = fit(args.dataset)
+    means, sigma, counts, transition = fit(args.dataset)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps({
         "schema": "hmm-emissions.v2",
         "means": means,
         "sigma": sigma,
         "counts": counts,
+        "transition": transition,
     }, indent=2, sort_keys=True) + "\n")
     print(f"fit {sum(counts.values())} labelled observations; "
           f"sigma={ {k: round(v, 4) for k, v in sigma.items()} }")
