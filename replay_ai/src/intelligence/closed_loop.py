@@ -67,6 +67,8 @@ class ClosedLoopSimulator:
         self.step_index = 0
         self.current_lap = 1
         self.lap_deployed = 0.0
+        self.battery_soh = 1.0
+        self.battery_temperature = 70.0
         self.model = MotorsportIntelligence(hmm_artifact=hmm_artifact,
                                              lap_map_artifact=lap_map_artifact)
 
@@ -95,8 +97,12 @@ class ClosedLoopSimulator:
     def step(self) -> SimulationStep:
         cfg = self.config
         public = self._observation()
-        decision = self.model.observe(public, own_speed_kmh=self.ego.speed_kmh,
-                                       own_soc=self.ego.energy, gap_s=self.ego.gap_s)
+        decision = self.model.observe(
+            public, own_speed_kmh=self.ego.speed_kmh,
+            own_soc=self.ego.energy, gap_s=self.ego.gap_s,
+            battery_soh=self.battery_soh,
+            battery_temperature=self.battery_temperature,
+        )
         target = decision.lap_energy_target
         target_remaining = max(0.0, (target or 0.0) - self.lap_deployed)
         can_deploy = target is None or target_remaining > 0.0
@@ -116,6 +122,12 @@ class ClosedLoopSimulator:
                                  (ego_accel - cfg.drag_kmh_s) * cfg.dt_s)
         self.ego.energy = max(0.0, min(100.0, self.ego.energy +
                                        energy_delta * cfg.dt_s))
+        # Reference SOH fade: sustained throughput increases degradation;
+        # temperature is a simple resistance-growth proxy.
+        throughput = abs(min(0.0, energy_delta)) * cfg.dt_s
+        self.battery_soh = max(0.60, self.battery_soh - throughput * 0.00005)
+        self.battery_temperature = max(20.0, min(110.0,
+            self.battery_temperature + (throughput * 0.02 - 0.01) * cfg.dt_s))
 
         if self.rival_mode is HiddenRivalMode.CONSERVE:
             rival_accel = cfg.rival_accel_kmh_s + 8.0

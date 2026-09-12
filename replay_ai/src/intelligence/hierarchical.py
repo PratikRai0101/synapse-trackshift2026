@@ -266,6 +266,7 @@ class MotorsportIntelligence:
         self.lap_map = None
         self.lap_planner = None
         self.last_lap_plan = None
+        self.last_soh_decision = None
         self._planned_lap = None
         if lap_map_artifact:
             try:
@@ -278,20 +279,28 @@ class MotorsportIntelligence:
         self.last_hmm: HMMResult | None = None
         self.last_level2 = None
 
-    def plan_lap(self, lap: int, energy: float, tyre_wear: float = 0.0):
+    def plan_lap(self, lap: int, energy: float, tyre_wear: float = 0.0,
+                 battery_soh: float = 1.0, battery_temperature: float = 70.0):
         """Re-plan the remaining configured horizon at a lap boundary."""
         if self.lap_planner is None:
             return None
         if self._planned_lap == lap and self.last_lap_plan is not None:
             return self.last_lap_plan
-        self.last_lap_plan = self.lap_planner.plan(energy, tyre_wear)
+        self.last_soh_decision = self.lifecycle.decide(battery_soh, battery_temperature)
+        self.last_lap_plan = self.lap_planner.plan(
+            energy, tyre_wear, battery_soh=battery_soh,
+            wear_cost=self.last_soh_decision.wear_cost,
+        )
         self._planned_lap = lap
         return self.last_lap_plan
 
     def observe(self, observation: RivalTelemetry, own_speed_kmh: float = 0.0,
-                own_soc: float = 70.0, gap_s: float | None = None) -> TacticalDecision:
+                own_soc: float = 70.0, gap_s: float | None = None,
+                battery_soh: float = 1.0,
+                battery_temperature: float = 70.0) -> TacticalDecision:
         if self.lap_planner is not None:
-            self.plan_lap(observation.lap, own_soc, observation.tyre_life)
+            self.plan_lap(observation.lap, own_soc, observation.tyre_life,
+                          battery_soh, battery_temperature)
         result = self.hmm.update(self.features.update(observation))
         self.last_hmm = result
         observed_gap = gap_s if gap_s is not None else observation.gap_s
