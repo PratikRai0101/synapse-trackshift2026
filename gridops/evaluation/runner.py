@@ -22,6 +22,7 @@ from ..contracts.state import (
 )
 from ..race_value.lap_map import TerminalValue, usable_energy_j
 from ..simulation.plant import Plant, initial_state
+from ..simulation.geometry import PassMonitor, PassOutcome, TrackPath
 from ..simulation.rivals import (
     RivalPolicy,
     RivalPolicyConfig,
@@ -66,6 +67,9 @@ class EpisodeReport:
     ego_energy_spent_j: float = 0.0
     pass_events: int = 0
     recross_events: int = 0
+    contacts: int = 0
+    track_exits: int = 0
+    catch_up_events: int = 0
     contested_steps: int = 0
     ego_steps: int = 0
     saturation_counts: dict[str, int] = field(default_factory=dict)
@@ -81,6 +85,9 @@ class EpisodeReport:
             "ego_energy_spent_j": self.ego_energy_spent_j,
             "pass_events": self.pass_events,
             "recross_events": self.recross_events,
+            "contacts": self.contacts,
+            "track_exits": self.track_exits,
+            "catch_up_events": self.catch_up_events,
             "decisions": len(self.decisions),
             "saturation_counts": dict(self.saturation_counts),
         }
@@ -138,6 +145,8 @@ class EpisodeRunner:
         controller = controller or ReferenceController()
         rng = random.Random(seed)
         cfg = self.config
+        path = TrackPath(self.track)
+        monitor = PassMonitor(self.track)
         ego = initial_state(
             self.battery, progress_m=cfg.ego_progress_m, speed_mps=cfg.initial_speed_mps
         )
@@ -157,7 +166,6 @@ class EpisodeRunner:
         previous_gap: float | None = None
         previous_decision: Decision | None = None
         since_ego_attack_s = 0.0
-        was_ahead = False
 
         while t < cfg.duration_s:
             gap = rival.state.progress_m - ego.progress_m
@@ -182,6 +190,7 @@ class EpisodeRunner:
                     p_k_dc_w=decision.p_k_dc_w,
                     target_speed_mps=decision.target_speed_mps,
                     horizon_s=cfg.replan_interval_s,
+                    lateral_target_m=decision.lateral_target_m,
                 )
                 report.decisions.append(
                     {
@@ -217,6 +226,7 @@ class EpisodeRunner:
                 p_k_dc_w=rival_power,
                 target_speed_mps=rival_target,
                 horizon_s=cfg.dt_s,
+                lateral_target_m=0.0,
             )
 
             ego_step = self._ego_plant.step(ego, ego_control, cfg.dt_s)
@@ -232,12 +242,11 @@ class EpisodeRunner:
             new_gap = rival.state.progress_m - ego.progress_m
             if abs(new_gap) <= 2.0:
                 report.contested_steps += 1
-            is_ahead = new_gap < PASS_GAP_M
-            if is_ahead and not was_ahead:
-                report.pass_events += 1
-            elif not is_ahead and was_ahead:
-                report.recross_events += 1
-            was_ahead = is_ahead
+            ego_pose = path.pose_at(ego.progress_m, ego.lateral_m)
+            rival_pose = path.pose_at(rival.state.progress_m, rival.state.lateral_m)
+            outcome = monitor.update(t, ego_pose, rival_pose)
+            if outcome is PassOutcome.CATCH_UP:
+                report.catch_up_events += 1
 
             report.ego_steps += 1
             t += cfg.dt_s
@@ -247,4 +256,8 @@ class EpisodeRunner:
         report.rival_final_progress_m = rival.state.progress_m
         report.ego_final_energy_j = usable_energy_j(ego.battery, self.battery)
         report.ego_energy_spent_j = max(0.0, ego_energy_start - report.ego_final_energy_j)
+        report.pass_events = monitor.passes
+        report.recross_events = monitor.re_passes
+        report.contacts = monitor.contacts
+        report.track_exits = monitor.exits
         return report

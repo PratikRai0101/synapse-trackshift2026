@@ -25,6 +25,7 @@ Use the venv at the repository root: `../.venv/bin/python`.
 | `simulation/plant.py` | longitudinal plant, grip envelope, corner cap, tracker | done, tested |
 | `simulation/track.py` | fixed-path geometry, synthetic circuit | done |
 | `simulation/rivals.py` | reactive policy families (stationary/matching/aggressive/conserving/delayed/ignoring) | done |
+| `simulation/geometry.py` | world path, oriented footprints, SAT overlap, track containment, pass monitor | done, tested |
 | `decision/commitment.py` | pricing, reserve guard, no-progress guard, commitment ledger | done, tested |
 | `decision/pomcp.py` | POMCP history-tree search over a generative model | done, tested |
 | `decision/planning.py` | conditional convex deployment planner (CVXPY + Clarabel), DCP/residual/trust-region checks | done, tested |
@@ -37,7 +38,7 @@ Use the venv at the repository root: `../.venv/bin/python`.
 
 ## Test coverage
 
-62 tests. Highlights:
+75 tests. Highlights:
 
 - **Battery:** OCV/current-root identity, energy conservation derivative,
   current/voltage/SOC saturation, cooling, no post-hoc SOC clipping.
@@ -55,6 +56,10 @@ Use the venv at the repository root: `../.venv/bin/python`.
 - **Planner:** DCP verified, `optimal` status, primal residuals measured, power
   and trust-region bounds enforced, corner limit respected, terminal reserve
   floor held, scarce energy reduces deployment, infeasible targets reported.
+- **Geometry:** world path generated from curvature, lateral offset
+  perpendicular, footprint corners, SAT overlap and separation, track
+  containment, and pass classification — contact and track exit can never be
+  counted as a pass, clearance must persist, re-passes are counted separately.
 
 ## Conventions frozen at G0
 

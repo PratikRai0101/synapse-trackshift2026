@@ -35,6 +35,8 @@ from .battery import solve_terminal_power, integrate as integrate_battery
 MIN_TRACKING_SPEED_MPS = 3.0
 SPEED_ERROR_GAIN_PER_S = 1.5
 MAX_TRACKING_ACCEL_MPS2 = 12.0
+MAX_LATERAL_RATE_MPS = 1.5
+HALF_VEHICLE_WIDTH_M = 1.0
 
 
 @dataclass
@@ -134,8 +136,18 @@ class Plant:
         if self.vehicle.fuel_burn_kg_per_s > 0.0 and f_engine > 0.0:
             fuel_new = max(0.0, fuel_new - self.vehicle.fuel_burn_kg_per_s * dt_s)
 
+        # --- kinematic lateral tracking, clamped inside the track.
+        half_track = self.track.width_at(s_new % self.track.length_m) / 2.0
+        lateral_limit = max(0.0, half_track - HALF_VEHICLE_WIDTH_M)
+        lateral_delta = control.lateral_target_m - state.lateral_m
+        max_lateral_step = MAX_LATERAL_RATE_MPS * dt_s
+        lateral_new = state.lateral_m + max(
+            -max_lateral_step, min(max_lateral_step, lateral_delta)
+        )
+        lateral_new = max(-lateral_limit, min(lateral_limit, lateral_new))
+
         return PlantStep(
-            state=VehicleState(s_new, v_new, fuel_new, battery_new),
+            state=VehicleState(s_new, v_new, fuel_new, battery_new, lateral_new),
             requested_p_k_dc_w=control.p_k_dc_w,
             realized_p_k_dc_w=realized_p_k_dc,
             terminal_power_w=power.power_w,
