@@ -13,6 +13,7 @@ from .commitment import (
     should_commit,
 )
 from .pomcp import POMCP, GenerativeModel, SearchResult
+from .planning import ConditionalConvexPlanner, ConvexPlan, PlannerConfig
 
 __all__ = [
     "REASON_COOLDOWN",
@@ -28,4 +29,7 @@ __all__ = [
     "POMCP",
     "GenerativeModel",
     "SearchResult",
+    "ConditionalConvexPlanner",
+    "ConvexPlan",
+    "PlannerConfig",
 ]

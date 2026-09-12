@@ -16,9 +16,11 @@ from typing import Any
 
 from .contracts.state import BatteryParams, VehicleParams
 from .decision.belief import RivalBelief
+from .decision.planning import ConditionalConvexPlanner, PlannerConfig
 from .evaluation.controllers import (
     AmbiguityAwareController,
     Controller,
+    ConvexPlannerController,
     PosteriorMeanPlanner,
     ReferenceController,
     StationaryPlanner,
@@ -75,6 +77,13 @@ def _controller(name: str, runner: EpisodeRunner, seed: int) -> Controller:
         return StationaryPlanner(runner.terminal_value, horizon=2, iterations=200)
     if name == "posterior_mean":
         return PosteriorMeanPlanner(runner.terminal_value, defensive_probability=0.5)
+    if name == "convex":
+        return ConvexPlannerController(
+            ConditionalConvexPlanner(
+                runner.track, runner.vehicle, runner.battery, runner.terminal_value,
+                PlannerConfig(),
+            )
+        )
     if name == "ambiguity_aware":
         return AmbiguityAwareController(
             terminal_value=runner.terminal_value,
@@ -121,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument(
         "--controller",
         default="ambiguity_aware",
-        choices=["reference", "stationary", "posterior_mean", "ambiguity_aware"],
+        choices=["reference", "stationary", "posterior_mean", "convex", "ambiguity_aware"],
     )
     run.add_argument("--rival-policy", default=None)
     run.add_argument("--seed", type=int, default=1)
@@ -182,6 +191,12 @@ def _benchmark(data: dict[str, Any], seed: int) -> list[dict[str, Any]]:
         "reference": lambda runner, s: ReferenceController(),
         "stationary": lambda runner, s: StationaryPlanner(runner.terminal_value, 2, 200),
         "posterior_mean": lambda runner, s: PosteriorMeanPlanner(runner.terminal_value, 0.5),
+        "convex": lambda runner, s: ConvexPlannerController(
+            ConditionalConvexPlanner(
+                runner.track, runner.vehicle, runner.battery, runner.terminal_value,
+                PlannerConfig(),
+            )
+        ),
         "ambiguity_aware": lambda runner, s: AmbiguityAwareController(
             runner.terminal_value, RivalBelief.uniform(), horizon=3, iterations=300, seed=s
         ),

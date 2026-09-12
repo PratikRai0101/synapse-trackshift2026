@@ -3,6 +3,7 @@
 from .controllers import (
     AmbiguityAwareController,
     Controller,
+    ConvexPlannerController,
     Decision,
     PosteriorMeanPlanner,
     ReferenceController,
@@ -19,6 +20,7 @@ from .runner import (
 __all__ = [
     "AmbiguityAwareController",
     "Controller",
+    "ConvexPlannerController",
     "Decision",
     "PosteriorMeanPlanner",
     "ReferenceController",
