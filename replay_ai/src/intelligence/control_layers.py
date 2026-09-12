@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Mapping, Sequence
 
 from .hierarchical import ERSMode, HMMResult
+from .socp_envelope import SOCPConfig, SOCPPerformanceEnvelope
 
 
 @dataclass(frozen=True)
@@ -35,17 +36,22 @@ class PerformanceEnvelope:
 
     def __init__(self, config: EnvelopeConfig | None = None) -> None:
         self.config = config or EnvelopeConfig()
+        self.socp = SOCPPerformanceEnvelope(SOCPConfig(
+            friction_mu=self.config.max_lateral_accel / 9.81,
+            gravity=9.81,
+            max_speed_kmh=self.config.max_speed_kmh,
+            min_speed_kmh=self.config.min_speed_kmh,
+        ))
 
     def point(self, distance_m: float, curvature: float,
               requested_speed_kmh: float) -> EnvelopePoint:
-        cfg = self.config
-        lateral_cap = math.sqrt(cfg.max_lateral_accel / max(abs(curvature), 1e-9))
-        speed_cap = min(cfg.max_speed_kmh, max(cfg.min_speed_kmh, lateral_cap * 3.6))
-        speed = min(max(cfg.min_speed_kmh, requested_speed_kmh), speed_cap)
-        lateral_used = (speed / 3.6) ** 2 * abs(curvature)
-        remaining = max(0.0, cfg.max_lateral_accel - lateral_used)
-        longitudinal = math.sqrt(remaining * cfg.max_longitudinal_accel / cfg.max_lateral_accel)
-        return EnvelopePoint(distance_m, speed_cap, longitudinal, speed <= speed_cap + 1e-9)
+        result = self.socp.solve(
+            [distance_m], [requested_speed_kmh], [curvature],
+            [self.config.max_longitudinal_accel],
+        )
+        point = result.points[0]
+        return EnvelopePoint(distance_m, point.speed_kmh,
+                             point.longitudinal_accel, result.feasible)
 
 
 @dataclass(frozen=True)
