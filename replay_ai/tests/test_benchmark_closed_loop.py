@@ -11,6 +11,13 @@ def test_benchmark_covers_all_hidden_rival_modes():
     assert all(episode["steps"] == 12 for episode in report["episodes"])
 
 
+def test_depleted_rival_produces_attack_evidence_but_conserving_rival_does_not():
+    depleted = run_episode(HiddenRivalMode.DEPLETE, 100)
+    conserving = run_episode(HiddenRivalMode.CONSERVE, 100)
+    assert depleted["commands"].get("BURN", 0) > 0
+    assert conserving["commands"].get("BURN", 0) == 0
+
+
 def test_episode_reports_command_counts_and_physical_metrics():
     result = run_episode(HiddenRivalMode.MATCH, 8)
     assert result["completed"]

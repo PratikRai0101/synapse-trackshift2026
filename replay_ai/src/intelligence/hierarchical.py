@@ -155,7 +155,10 @@ class FortyStateHMM:
         defaults = {
             ERSMode.HIGH.value: {"dgap": .10, "throttle_clip": .00, "brake_delta": 0.0},
             ERSMode.MEDIUM.value: {"dgap": .03, "throttle_clip": .05, "brake_delta": 0.0},
-            ERSMode.HARVEST.value: {"dgap": -.05, "throttle_clip": .08, "brake_delta": 0.0},
+            # Deliberate lift/managed pedal is not a super-clip; its public
+            # signature is a small negative closure (the rival preserves pace
+            # while the ego does not gain) with no pinned-throttle clipping.
+            ERSMode.HARVEST.value: {"dgap": -.05, "throttle_clip": .00, "brake_delta": 0.0},
             ERSMode.DERATE.value: {"dgap": .16, "throttle_clip": .55, "brake_delta": 0.0},
         }
         means = {**defaults.get(ers.value, {}), **self.emission_means.get(ers.value, {})}

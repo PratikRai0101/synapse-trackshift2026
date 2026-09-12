@@ -66,9 +66,19 @@ class ClosedLoopSimulator:
     def _observation(self) -> RivalTelemetry:
         # Only the rival's public channels enter the model. Rival SOC/mode is
         # deliberately absent; it exists only inside this simulator.
+        if self.rival_mode is HiddenRivalMode.CONSERVE:
+            # Managed pedal: deliberately hoard energy while appearing merely
+            # a little slower on a timing screen.
+            throttle = 92.0
+        elif self.rival_mode is HiddenRivalMode.DEPLETE:
+            # Foot pinned but car is physically unable to sustain pace: the
+            # public signature of L_derate.
+            throttle = 100.0
+        else:
+            throttle = 100.0 if self.rival.speed_kmh < 300.0 else 92.0
         return RivalTelemetry(
             speed_kmh=self.rival.speed_kmh,
-            throttle_pct=100.0 if self.rival.speed_kmh < 300.0 else 92.0,
+            throttle_pct=throttle,
             brake=0.0,
             gap_s=max(0.0, self.ego.gap_s),
             active_aero=1.0 if self.ego.gap_s < 1.0 else 0.0,
@@ -94,9 +104,11 @@ class ClosedLoopSimulator:
                                        energy_delta * cfg.dt_s))
 
         if self.rival_mode is HiddenRivalMode.CONSERVE:
-            rival_accel = cfg.rival_accel_kmh_s - 4.0
+            rival_accel = cfg.rival_accel_kmh_s + 8.0
         elif self.rival_mode is HiddenRivalMode.DEPLETE:
-            rival_accel = cfg.rival_accel_kmh_s + 5.0
+            # The rival loses pace despite 100% throttle, creating a genuine
+            # attack opportunity visible through public speed/gap response.
+            rival_accel = cfg.rival_accel_kmh_s - 12.0
         else:
             rival_accel = cfg.rival_accel_kmh_s
         self.rival.speed_kmh = max(0.0, self.rival.speed_kmh +
