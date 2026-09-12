@@ -14,6 +14,7 @@ Three guards, in order of how much work they do:
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Sequence
 
@@ -47,6 +48,62 @@ def conservative_improvement(
 
 def should_commit(improvement: float, margin: float) -> bool:
     return improvement > margin
+
+
+def cvar_improvement(
+    reference_costs: Sequence[float],
+    candidate_costs: Sequence[float],
+    alpha: float = 0.2,
+    error_allowance: float = 0.0,
+) -> float:
+    """Mean of the ``alpha`` worst paired gains (lower is more conservative).
+
+    ``alpha=1`` reduces to the posterior mean improvement. This is a different
+    criterion from the worst-case commitment rule, not a substitute for it.
+    """
+    if len(reference_costs) != len(candidate_costs):
+        raise ValueError("reference and candidate costs must align on hypotheses")
+    if not reference_costs:
+        raise ValueError("at least one hypothesis is required")
+    if not 0.0 < alpha <= 1.0:
+        raise ValueError("alpha must be in (0, 1]")
+    gains = sorted(r - c for r, c in zip(reference_costs, candidate_costs))
+    k = max(1, math.ceil(alpha * len(gains)))
+    return sum(gains[:k]) / k - error_allowance
+
+
+def regret_by_action(
+    candidate_costs_by_action: dict[str, Sequence[float]],
+) -> dict[str, list[float]]:
+    """Per-hypothesis regret of each action relative to the best action."""
+    actions = list(candidate_costs_by_action)
+    if not actions:
+        return {}
+    n = len(candidate_costs_by_action[actions[0]])
+    for action in actions:
+        if len(candidate_costs_by_action[action]) != n:
+            raise ValueError("all actions must align on hypotheses")
+    best_per_hypothesis = [
+        min(candidate_costs_by_action[action][i] for action in actions) for i in range(n)
+    ]
+    return {
+        action: [
+            candidate_costs_by_action[action][i] - best_per_hypothesis[i] for i in range(n)
+        ]
+        for action in actions
+    }
+
+
+def minimax_regret(
+    candidate_costs_by_action: dict[str, Sequence[float]],
+) -> tuple[str | None, dict[str, float]]:
+    """Action minimising the worst per-hypothesis regret, and the regrets."""
+    regret = regret_by_action(candidate_costs_by_action)
+    if not regret:
+        return None, {}
+    worst = {action: max(values) for action, values in regret.items()}
+    best_action = min(worst, key=lambda action: worst[action])
+    return best_action, worst
 
 
 @dataclass
