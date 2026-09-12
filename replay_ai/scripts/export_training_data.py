@@ -13,6 +13,10 @@ import pickle
 from pathlib import Path
 from typing import Iterable, Mapping
 
+try:
+    import _bootstrap  # noqa: F401  (adds project root to sys.path)
+except ImportError:  # imported as ``scripts.<name>`` by the test suite
+    from . import _bootstrap  # noqa: F401
 from src.intelligence.telemetry_adapter import PublicTelemetryAdapter
 
 

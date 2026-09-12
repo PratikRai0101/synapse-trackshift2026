@@ -20,6 +20,11 @@ from pathlib import Path
 from typing import Dict
 
 try:
+    import _bootstrap  # noqa: F401  (adds project root + scripts to sys.path)
+except ImportError:  # imported as part of the scripts package
+    from . import _bootstrap  # noqa: F401
+
+try:
     from scripts.export_training_data import export_frames
 except ImportError:  # direct execution from the scripts directory
     from export_training_data import export_frames
