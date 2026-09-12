@@ -36,12 +36,13 @@ Use the venv at the repository root: `../.venv/bin/python`.
 | `race_value/lap_map.py` | monotone terminal resource value, reserve band, finite-horizon value recursion | done, tested |
 | `evaluation/controllers.py` | reference, stationary (B_stat), posterior-mean (B_mean), ambiguity-aware (M) | wired |
 | `evaluation/calibration.py` | paired plant rollouts fitting gap-closure and rival-response models | done; identifiability open |
+| `evaluation/batch.py` | frozen paired batch, ablation matrix, failure accounting, paired deltas | done, tested |
 | `evaluation/runner.py` | deterministic episode, public-only `DecisionInput` | done, tested |
 | `cli.py` | validate-config, run, benchmark | done |
 
 ## Test coverage
 
-113 passing, 1 xfailed. Highlights:
+121 passing, 1 xfailed. Highlights:
 
 - **Battery:** OCV/current-root identity, energy conservation derivative,
   current/voltage/SOC saturation, cooling, no post-hoc SOC clipping.
@@ -78,6 +79,11 @@ Use the venv at the repository root: `../.venv/bin/python`.
   more than rich.
 - **Risk criteria:** CVaR is more conservative than the mean and equals it at
   ``alpha=1``; minimax regret selects the action with the lowest worst regret.
+- **Batch and ablations:** seeded paired rows, failures retained, completion
+  rates, per-seed paired deltas, and one-factor ablation variants. The
+  3-seed x 5-policy development batch shows M beating the reference by ~52 m
+  median paired gap but incurring ~1 086 modeled contacts — recorded as
+  limitation 8 in HANDOFF, not hidden.
 
 ## Known open item: residual ambiguity
 

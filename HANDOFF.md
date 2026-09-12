@@ -7,7 +7,7 @@ imported here.
 
 ## What is built and passing
 
-113 passing, 1 xfailed (`python -m pytest`). See `gridops/README.md` for the module table.
+121 passing, 1 xfailed (`python -m pytest`). See `gridops/README.md` for the module table.
 
 Working and verified:
 
@@ -55,6 +55,12 @@ Working and verified:
   assumption. Exposes the same surface as the particle belief, so M can run on
   either backend and the two are directly comparable (`ambiguity_aware` vs
   `ambiguity_aware_hmm` vs `ambiguity_aware_hmm_stationary`).
+- **Frozen paired batch and ablation matrix** (`evaluation/batch.py`): seeded
+  controllers x rival policies x seeds, paired on initial conditions, failures
+  recorded rather than dropped, completion rates beside every metric, per-seed
+  paired deltas against a baseline, and one-factor ablation variants (no
+  continuation value, no commitment margin, no belief update, no probe,
+  posterior-mean criterion). CLI: `python -m gridops.cli batch <config>`.
 - Deterministic episode runner and a public-only decision input.
 - Leakage gate: hidden rival state and future samples cannot reach the controller.
 - CLI: `validate-config`, `run`, `benchmark`.
@@ -76,6 +82,34 @@ With the geometry and tyre models active the picture is: every baseline that
 actually engages spends 0.7–2.1 MJ and incurs 370–460 contact frames (it drives
 through the rival), while M spends ~0.4 MJ, incurs zero contacts and reaches
 catch-up. One seed, one synthetic circuit — a smoke test, not a result.
+
+## Ablation batch (3 seeds, 5 rival policies, development split)
+
+`python -m gridops.cli batch configs/scenario_synthetic.json --seeds 3`
+
+| controller | median gap m | mean energy J | passes | contacts | median paired Δgap m |
+|---|---:|---:|---:|---:|---:|
+| reference | 47.86 | 125 023 | 0 | 0 | 0.00 |
+| **M (full)** | **−1.39** | 1 585 979 | 1 | **1 086** | **−51.70** |
+| M − continuation value | −6.88 | 1 635 744 | 6 | 1 206 | −54.75 |
+| M − commitment margin | −2.35 | 1 683 679 | 0 | 4 272 | −49.60 |
+| M − belief update | −3.33 | 1 518 617 | 0 | 1 386 | −50.43 |
+| M − probe | −1.60 | 1 573 756 | 0 | 4 125 | −49.46 |
+| M posterior-mean criterion | −1.39 | 1 584 696 | 1 | 1 086 | −48.81 |
+
+Read this honestly:
+
+- M beats the reference on position by ~52 m of median paired gap. Real for this
+  synthetic model, and the headline.
+- **M incurs ~1 086 modeled contacts**, about 14% of episode time overlapping the
+  rival. The geometry layer reports them correctly; the lateral policy does not
+  prevent them. **This is now the most important engineering defect and it must
+  not be hidden.** A position gain obtained by driving through the rival is not a
+  valid result.
+- Removing the continuation value improves position (−54.75 m) but spends and
+  contacts more: the safety/attrition trade-off the ablation was built to expose.
+- Removing the commitment margin is worst by contacts (4 272), as the
+  anti-attrition design predicts.
 
 ## Known limitations (do not hide these)
 
@@ -118,6 +152,13 @@ catch-up. One seed, one synthetic circuit — a smoke test, not a result.
 7. **Model mismatch is not reported per decision.** The planner's predicted
    profile and the plant's realized trajectory are not yet compared in the
    episode record.
+
+8. **Position gain is currently obtained through contact.** The ablation batch
+   shows M beating the reference by ~52 m median paired gap, but with ~1 086
+   modeled contact frames (~14% of episode time). The geometry layer is correct;
+   the lateral policy and supervisor do not yet enforce separation. Until fixed,
+   the position result is not a valid pass result. Fix: make modeled contact a
+   hard infeasibility in the supervisor, not a post-hoc counter.
 
 ## Next slices, by owner
 
