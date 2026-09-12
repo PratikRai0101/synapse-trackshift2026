@@ -14,6 +14,7 @@ from .hierarchical import ERSMode, HMMResult
 from .socp_envelope import SOCPConfig, SOCPPerformanceEnvelope
 from .scenario_search import BoundedPOMCP, SearchConfig
 from .zone_mpc import ZoneMPC, ZoneMPCConfig, ZoneMPCResult
+from .spatial_planner import TrackSample, SpatialReference, SpatialTrajectoryPlanner
 
 
 @dataclass(frozen=True)
@@ -74,6 +75,7 @@ class Level2Plan:
     action_scores: tuple[ScenarioAction, ...]
     envelope: EnvelopePoint
     search_values: Mapping[str, float] | None = None
+    spatial_reference: SpatialReference | None = None
 
 
 class BoundedScenarioPlanner:
@@ -88,6 +90,7 @@ class BoundedScenarioPlanner:
                  search_config: SearchConfig | None = None) -> None:
         self.envelope = envelope or PerformanceEnvelope()
         self.searcher = BoundedPOMCP(search_config)
+        self.spatial = SpatialTrajectoryPlanner()
 
     def plan(self, hmm: HMMResult, own_speed_kmh: float, gap_s: float,
              energy: float, curvature: float = 0.0) -> Level2Plan:
@@ -120,14 +123,19 @@ class BoundedScenarioPlanner:
         if search_allowed:
             selected = next(action for action in scored if action.command == search.action)
         envelope = self.envelope.point(0.0, curvature, own_speed_kmh)
-        reference = tuple(min(envelope.speed_limit_kmh,
-                              max(0.0, own_speed_kmh + selected.expected_gap_change_s * 20.0))
-                          for _ in range(5))
-        lambda_kin = tuple(1.0 if speed < envelope.speed_limit_kmh else 0.0
-                            for speed in reference)
+        track = tuple(TrackSample(index * 25.0,
+                                   max(0.0, curvature + 0.0002 * index))
+                      for index in range(5))
+        spatial = self.spatial.plan(
+            track,
+            max(0.0, own_speed_kmh),
+            speed_gain_kmh=selected.expected_gap_change_s * 20.0,
+        )
+        reference = spatial.speeds_kmh
+        lambda_kin = spatial.kinetic_costates
         lambda_b = max(0.01, (100.0 - energy) / 100.0)
         return Level2Plan(selected.command, reference, lambda_kin, lambda_b,
-                          tuple(scored), envelope, search.values)
+                          tuple(scored), envelope, search.values, spatial)
 
 
 @dataclass(frozen=True)

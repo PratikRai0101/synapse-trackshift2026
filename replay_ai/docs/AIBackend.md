@@ -187,12 +187,14 @@ Fitting a pooled within-mode standard deviation per feature
    SOH now scales usable Level 3 energy, adds resistance/wear cost, and fades
    under closed-loop throughput. The constants are not yet fitted to cell or
    race battery data.
-6. **Level 2 now has explicit SOC and bounded belief-tree baselines, but not
-   production SOCP/POMCP.** `socp_envelope.py` projects requested
+6. **Level 2 now has explicit spatial SOC and bounded belief-tree baselines,
+   but not production SOCP/POMCP.** `socp_envelope.py` projects requested
    speed/longitudinal acceleration onto the tyre cone and reports primal
-   residuals. `scenario_search.py` samples hidden ERS modes from belief and
-   prices continuation energy over bounded rollouts. Safety gates still prevent
-   weak evidence from triggering BURN/HARVEST. Level 1 now has a linear
+   residuals. `spatial_planner.py` evaluates the upcoming curvature profile and
+   produces a distance-indexed speed/costate reference. `scenario_search.py`
+   samples hidden ERS modes from belief and prices continuation energy over
+   bounded rollouts. Safety gates still prevent weak evidence from triggering
+   BURN/HARVEST. Level 1 now has a linear
    zone-MPC LP (`zone_mpc.py`) with speed-zone and reserve constraints; it still
    requires actuator and plant validation before production use.
 7. **The season SOH model is a reference degradation model.** It is a small
