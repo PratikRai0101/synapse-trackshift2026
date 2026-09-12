@@ -28,6 +28,7 @@ from .closed_loop import (
     SimulationStep, ClosedLoopSimulator,
 )
 from .socp_envelope import SOCPConfig, SOCPPoint, SOCPProfile, SOCPPerformanceEnvelope
+from .scenario_search import ACTIONS, SearchConfig, SearchResult, BoundedPOMCP
 from .control_layers import (
     EnvelopeConfig, EnvelopePoint, PerformanceEnvelope, ScenarioAction,
     Level2Plan, BoundedScenarioPlanner, Level1Command, FastExecutionController,
@@ -78,6 +79,10 @@ __all__ = [
     "SOCPPoint",
     "SOCPProfile",
     "SOCPPerformanceEnvelope",
+    "ACTIONS",
+    "SearchConfig",
+    "SearchResult",
+    "BoundedPOMCP",
     "EnvelopeConfig",
     "EnvelopePoint",
     "PerformanceEnvelope",

@@ -187,12 +187,13 @@ Fitting a pooled within-mode standard deviation per feature
    SOH now scales usable Level 3 energy, adds resistance/wear cost, and fades
    under closed-loop throughput. The constants are not yet fitted to cell or
    race battery data.
-6. **Level 2 now has an explicit SOC envelope baseline, but not full POMCP.**
-   `socp_envelope.py` projects requested speed/longitudinal acceleration onto
-   the tyre cone and reports primal residuals. `control_layers.py` uses it as
-   the feasibility checker with a bounded three-action scenario planner. It is
-   not yet a full spatial SOCP/POMCP implementation. Level 1 remains a
-   reference cue controller rather than validated MPC.
+6. **Level 2 now has explicit SOC and bounded belief-tree baselines, but not
+   production SOCP/POMCP.** `socp_envelope.py` projects requested
+   speed/longitudinal acceleration onto the tyre cone and reports primal
+   residuals. `scenario_search.py` samples hidden ERS modes from belief and
+   prices continuation energy over bounded rollouts. Safety gates still prevent
+   weak evidence from triggering BURN/HARVEST. Level 1 remains a reference cue
+   controller rather than validated MPC.
 7. **The season SOH model is a reference degradation model.** It is a small
    finite-horizon DP with indicative constants, not a validated cell model.
 8. **The closed loop is a development simulator.** It is action-responsive and
