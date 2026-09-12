@@ -20,7 +20,7 @@ Use the venv at the repository root: `../.venv/bin/python`.
 
 | Module | Contents | Status |
 |---|---|---|
-| `contracts/` | units, provenance, state/params, records, `DecisionInput` | done, tested |
+| `contracts/` | units, provenance, state/params, records, `DecisionInput`, event rules | done, tested |
 | `simulation/battery.py` | one-resistance electrothermal, signed accounting, saturation | done, tested |
 | `simulation/plant.py` | longitudinal plant, grip envelope, corner cap, tracker | done, tested |
 | `simulation/track.py` | fixed-path geometry, synthetic circuit | done |
@@ -43,7 +43,7 @@ Use the venv at the repository root: `../.venv/bin/python`.
 
 ## Test coverage
 
-125 passing, 1 xfailed. Highlights:
+133 passing, 1 xfailed. Highlights:
 
 - **Battery:** OCV/current-root identity, energy conservation derivative,
   current/voltage/SOC saturation, cooling, no post-hoc SOC clipping.
@@ -84,6 +84,11 @@ Use the venv at the repository root: `../.venv/bin/python`.
   rates, per-seed paired deltas, and one-factor ablation variants. The
   3-seed x 5-policy development batch shows M beating the reference by ~40 m
   median paired gap with **zero** modeled contacts after the contact supervisor.
+- **Rules:** the FIA 2026 deployment envelope reproduces its breakpoints
+  (350 kW through 290 km/h, taper to zero by 345 km/h; overtake retains 350 kW
+  to 337.5 km/h); an UNKNOWN permission falls back to the normal envelope with
+  a reason and never silently grants the restricted mode; the plant clamps
+  deployment and records `RULE_LIMIT`.
 - **Safety:** contact is a hard feasibility check. Directly behind and closing
   predicts contact; lateral separation clears it; the safe-speed scan returns a
   cap that the projection confirms is contact-free.
