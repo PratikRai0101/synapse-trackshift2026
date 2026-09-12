@@ -17,6 +17,14 @@ def test_search_is_deterministic_and_values_all_root_actions():
     assert first.rollouts == 60
 
 
+def test_particle_search_tracks_belief_histories_and_risk_values():
+    result_value = BoundedPOMCP(SearchConfig(simulations=40, particles=24, seed=9)).search(
+        result(), gap_s=0.5, energy=70)
+    assert result_value.particle_count == 24
+    assert result_value.history_count > 0
+    assert set(result_value.risk_values) == set(result_value.values)
+
+
 def test_planner_exposes_search_values_and_keeps_safety_gate():
     plan = BoundedScenarioPlanner().plan(result(), 300, 0.5, 70)
     assert plan.search_values is not None
