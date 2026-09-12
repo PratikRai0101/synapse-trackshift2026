@@ -410,14 +410,17 @@ class F1RaceReplayWindow(arcade.Window):
             official_data=False,
         )
 
-        if session is not None and hasattr(session, 'laps'):
+        if session is not None:
             try:
+                # FastF1 exposes ``laps`` as a property that raises
+                # DataNotLoadedError; ``hasattr`` is therefore not a safe probe.
+                session_laps = session.laps
                 import pandas as pd
                 import fastf1._api as ffapi
                 import fastf1.utils as ffutils
                 from src.lib.tyres import get_tyre_compound_int
                 result = {}
-                for _, row in session.laps.iterrows():
+                for _, row in session_laps.iterrows():
                     code = row.get("Driver")
                     lap_num = row.get("LapNumber")
                     lap_time_td = row.get("LapTime")
@@ -443,10 +446,10 @@ class F1RaceReplayWindow(arcade.Window):
                         t_life = int(tyre_life)
                         
                     is_pit_entry = False
-                    if "PitInTime" in session.laps.columns and pd.notna(row.get("PitInTime")):
+                    if "PitInTime" in session_laps.columns and pd.notna(row.get("PitInTime")):
                         is_pit_entry = True
                     is_out_lap = False
-                    if "PitOutTime" in session.laps.columns and pd.notna(row.get("PitOutTime")):
+                    if "PitOutTime" in session_laps.columns and pd.notna(row.get("PitOutTime")):
                         is_out_lap = True
                         
                     result.setdefault(code, []).append({
