@@ -165,6 +165,22 @@ def main(year=None, round_number=None, playback_speed=1, session_type='R', visib
         'circuit_length_m': float(example_lap["Distance"].max()) if example_lap is not None and "Distance" in example_lap else None,
     }
 
+    # Deterministic Judge Mode scenario bookmarks. Built offline by
+    # scripts/build_scenario_bookmarks.py; absent simply means the 5-0 slots
+    # stay on the even phase bookmarks.
+    try:
+        from src.intelligence.scenarios import (
+            load_scenario_artifact,
+            scenario_artifact_path,
+        )
+
+        scenario_targets = load_scenario_artifact(
+            scenario_artifact_path(year, round_number)
+        )
+    except Exception as exc:
+        scenario_targets = {}
+        print(f"Scenario bookmarks unavailable: {exc}")
+
     # Launch insights menu (always shown with replay)
     launch_insights_menu()
     print("Launching insights menu...")
@@ -185,6 +201,7 @@ def main(year=None, round_number=None, playback_speed=1, session_type='R', visib
       ready_file=ready_file,
       session_info=session_info,
       session=session,
+      scenario_bookmarks=scenario_targets,
       enable_telemetry=True,
       race_control_messages=race_telemetry.get('race_control_messages', [])
     )

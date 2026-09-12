@@ -358,6 +358,53 @@ def build_bookmarks(frame_count: int, total_laps: Optional[int]) -> tuple[JudgeB
     return tuple(points)
 
 
+def _nearest_free_frame(frame: int, used: set[int], count: int) -> int:
+    for offset in range(1, count + 1):
+        for candidate in (frame - offset, frame + offset):
+            if 0 <= candidate < count and candidate not in used:
+                return candidate
+    return frame
+
+
+def build_scenario_bookmarks(
+    scenario_frames: Mapping[str, int],
+    frame_count: int,
+    total_laps: Optional[int] = None,
+) -> tuple[JudgeBookmark, ...]:
+    """Fill the six 5-0 slots with detected decision scenarios.
+
+    A scenario the scan could not find falls back to the phase bookmark for
+    that slot, so the demo always exposes exactly six deterministic moments
+    rather than a variable-length list.
+    """
+    # Imported lazily: scenario detection pulls the inference stack, which the
+    # panel module otherwise avoids at import time.
+    from src.intelligence.scenarios import SCENARIOS
+
+    generic = build_bookmarks(frame_count, total_laps)
+    count = max(0, int(frame_count))
+    if count == 0:
+        return ()
+    frames = scenario_frames or {}
+    used: set[int] = set()
+    points: list[JudgeBookmark] = []
+    for index, spec in enumerate(SCENARIOS):
+        frame = frames.get(spec.key)
+        title, subtitle = spec.title, spec.subtitle
+        if frame is None and index < len(generic):
+            fallback = generic[index]
+            frame = fallback.frame_index
+            title, subtitle = fallback.title, fallback.subtitle
+        frame = max(0, min(int(frame if frame is not None else 0), count - 1))
+        if frame in used:
+            frame = _nearest_free_frame(frame, used, count)
+        used.add(frame)
+        points.append(
+            JudgeBookmark(frame, BOOKMARK_HOTKEYS[index], title, subtitle)
+        )
+    return tuple(points)
+
+
 class JudgeModeController:
     """Pure interaction state for Judge Mode and its bookmark selector."""
 
