@@ -31,6 +31,7 @@ from .socp_envelope import SOCPConfig, SOCPPoint, SOCPProfile, SOCPPerformanceEn
 from .scenario_search import ACTIONS, SearchConfig, SearchResult, BoundedPOMCP
 from .zone_mpc import ZoneMPCConfig, ZoneMPCResult, ZoneMPC
 from .vehicle_plant import PlantConfig, PlantState, PlantStep, VehiclePlant
+from .spatial_planner import TrackSample, SpatialReference, SpatialTrajectoryPlanner
 from .control_layers import (
     EnvelopeConfig, EnvelopePoint, PerformanceEnvelope, ScenarioAction,
     Level2Plan, BoundedScenarioPlanner, Level1Command, FastExecutionController,
@@ -92,6 +93,9 @@ __all__ = [
     "PlantState",
     "PlantStep",
     "VehiclePlant",
+    "TrackSample",
+    "SpatialReference",
+    "SpatialTrajectoryPlanner",
     "EnvelopeConfig",
     "EnvelopePoint",
     "PerformanceEnvelope",
