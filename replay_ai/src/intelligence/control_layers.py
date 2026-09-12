@@ -96,7 +96,8 @@ class BoundedScenarioPlanner:
         self.use_spatial = use_spatial
 
     def plan(self, hmm: HMMResult, own_speed_kmh: float, gap_s: float,
-             energy: float, curvature: float = 0.0) -> Level2Plan:
+             energy: float, curvature: float = 0.0,
+             wear_cost: float = 0.0) -> Level2Plan:
         p = hmm.ers_probabilities
         reserve_value = max(0.0, energy - 5.0) * 0.02
         actions = (
@@ -138,7 +139,7 @@ class BoundedScenarioPlanner:
         else:
             reference = spatial.speeds_kmh
             lambda_kin = spatial.kinetic_costates
-        lambda_b = max(0.01, (100.0 - energy) / 100.0)
+        lambda_b = max(0.01, (100.0 - energy) / 100.0 + max(0.0, wear_cost))
         return Level2Plan(selected.command, reference, lambda_kin, lambda_b,
                           tuple(scored), envelope, search.values, spatial)
 

@@ -65,21 +65,28 @@ class ClosedLoopSimulator:
                  lap_map_artifact: str | None = None,
                  seed: int = 0,
                  use_mpc: bool = True,
-                 controller_variant: str = "full") -> None:
+                 controller_variant: str = "full",
+                 scenario: str = "nominal") -> None:
         self.config = config or SimulationConfig()
         self.rival_mode = rival_mode  # simulation truth; never passed to model
         rng = random.Random(seed)
         initial_speed = 275.0 + rng.random() * 10.0
         initial_gap = 0.8 + rng.random() * 0.4
-        self.ego = CarState(initial_speed, initial_gap, 70.0)
-        self.rival = CarState(initial_speed, initial_gap, 70.0)
-        self.plant = VehiclePlant(PlantState(speed_kmh=initial_speed, energy=70.0))
+        energy, soh, temperature = {
+            "nominal": (70.0, 1.0, 70.0),
+            "energy_stress": (35.0, 0.82, 85.0),
+            "thermal_stress": (50.0, 0.88, 105.0),
+        }.get(scenario, (70.0, 1.0, 70.0))
+        self.ego = CarState(initial_speed, initial_gap, energy)
+        self.rival = CarState(initial_speed, initial_gap, energy)
+        self.plant = VehiclePlant(PlantState(speed_kmh=initial_speed, energy=energy))
         self.time_s = 0.0
         self.step_index = 0
         self.current_lap = 1
         self.lap_deployed = 0.0
-        self.battery_soh = 1.0
-        self.battery_temperature = 70.0
+        self.battery_soh = soh
+        self.battery_temperature = temperature
+        self.scenario = scenario
         self.controller_variant = controller_variant
         self.model = MotorsportIntelligence(
             hmm_artifact=hmm_artifact,
