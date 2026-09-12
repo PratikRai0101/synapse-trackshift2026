@@ -25,6 +25,7 @@ def _samples(path: Path):
                     fuel_deployed=float(row.get("fuel_deployed", 0.0)),
                     tyre_wear=float(row.get("tyre_wear", 0.0)),
                     mass_kg=float(row.get("mass_kg", 800.0)),
+                    track_baseline_s=float(row.get("track_baseline_s", 90.0)),
                 )
 
 
