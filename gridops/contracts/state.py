@@ -91,10 +91,15 @@ class VehicleState:
     speed_mps: float
     fuel_kg: float
     battery: BatteryState
+    lateral_m: float = 0.0
 
     def copy(self) -> "VehicleState":
         return VehicleState(
-            self.progress_m, self.speed_mps, self.fuel_kg, self.battery.copy()
+            self.progress_m,
+            self.speed_mps,
+            self.fuel_kg,
+            self.battery.copy(),
+            self.lateral_m,
         )
 
 
@@ -119,13 +124,15 @@ class Control:
     """A candidate control interval.
 
     ``target_speed_mps`` is the tracker's reference; the plant owns the actual
-    engine/brake split and may saturate it.
+    engine/brake split and may saturate it. ``lateral_target_m`` is the
+    kinematically tracked lateral offset from the centreline.
     """
 
     family: ActionFamily
     p_k_dc_w: float
     target_speed_mps: float
     horizon_s: float = 1.0
+    lateral_target_m: float = 0.0
 
 
 @dataclass(frozen=True)

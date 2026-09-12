@@ -31,7 +31,12 @@ Working and verified:
   Clarabel second-order-cone subproblem over a spatial grid, frozen local
   coefficients, trust region, measured primal residuals, DCP check, and an
   infeasible-target path that is reported rather than hidden. Wired as the
-  `convex` controller.
+  `convex` controller and optionally inside M.
+- **Geometric passing model** (`simulation/geometry.py`): world path generated
+  from track curvature, oriented rectangular footprints, SAT overlap, track
+  containment, and a pass monitor requiring clearance margin plus persistence
+  with no contact or track exit. Order changes without those are `catch_up`.
+  The model immediately reclassified every earlier "pass" as a contact.
 - Deterministic episode runner and a public-only decision input.
 - Leakage gate: hidden rival state and future samples cannot reach the controller.
 - CLI: `validate-config`, `run`, `benchmark`.
@@ -40,20 +45,20 @@ Working and verified:
 
 `python -m gridops.cli benchmark configs/scenario_synthetic.json --seed 1`
 
-| controller | matching spent J | conserving spent J | passes (conserving) |
+| controller | matching spent J | conserving spent J | clean passes (conserving, 25 s) |
 |---|---:|---:|---:|
 | reference | 125 023 | 125 023 | 0 |
-| stationary (B_stat) | 2 087 581 | 678 013 | 2 |
-| posterior_mean (B_mean) | 1 987 540 | 577 758 | 1 |
-| convex (planner only) | 1 416 304 | 1 416 304 | 0 |
-| ambiguity_aware (M, fixed powers) | 425 699 | 425 699 | 1 |
-| ambiguity_aware_convex (M, planner-realized) | 352 733 | 352 733 | 0 |
+| stationary (B_stat) | 2 087 581 | 678 013 | 0 (contacts) |
+| posterior_mean (B_mean) | 1 987 540 | 577 758 | 0 (contacts) |
+| convex (planner only) | 1 416 304 | 1 416 304 | 0 (contacts) |
+| ambiguity_aware (M, fixed powers) | 425 699 | 425 699 | 0 (catch-up only) |
+| ambiguity_aware_convex (M, planner-realized) | 352 733 | 352 733 | 0 (catch-up only) |
 
-The intended result is visible: the base-paper stationary planner over-commits
-(burns ~2 MJ against a defending rival for no pass), the guarded fixed-power M
-spends ~5× less and passes the weak rival, and the planner-realized variant is
-more frugal still. Treat this as a smoke test, not a result — one seed, one
-synthetic circuit, no uncertainty intervals.
+After the geometry gate was added, the earlier "pass" counts became contacts:
+the cars were overlapping when order changed. At 25 s the guarded controllers
+reach catch-up only; extending the episode to 70 s produces one clean pass and
+one re-pass with the same controller. This is the honest R13 state, not a
+tuning failure.
 
 ## Known limitations (do not hide these)
 
@@ -63,9 +68,11 @@ synthetic circuit, no uncertainty intervals.
    controller's action distribution is currently dominated by the fixed probe
    schedule (constant 425 699 J across rival policies). The information is not
    yet changing the policy. This is the single most important open item.
-2. **Pass claims are catch-up only.** No footprint/containment/persistence
-   geometry model exists yet. The runner counts order changes, not completed
-   passes.
+2. **Pass claims are now geometrically gated; only catch-up is reached at 25 s.**
+   The geometry model exists and rejects contact/track-exit as passes. The
+   guarded controller reaches catch-up within the 25 s benchmark and one clean
+   pass at ~70 s. Lengthen the benchmark episode or raise the committed pace to
+   get passes inside the default window.
 3. **The surrogate is not validated against the plant.** POMCP ranks candidates
    on the surrogate; the nonlinear plant executes them. Model mismatch is not
    yet measured or reported per decision.

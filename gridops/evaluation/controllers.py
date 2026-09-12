@@ -48,6 +48,7 @@ class Decision:
     runtime_s: float = 0.0
     search_iterations: int = 0
     timed_out: bool = False
+    lateral_target_m: float = 0.0
 
 
 class Controller(Protocol):
@@ -68,6 +69,17 @@ def _power_for_family(family: ActionFamily, params: TacticalParams) -> float:
     if family is ActionFamily.PROBE:
         return 50_000.0
     return 150_000.0
+
+
+def _target_lateral(family: ActionFamily) -> float:
+    """Pass offset: move alongside the rival before attempting a pass."""
+    if family in (
+        ActionFamily.ATTACK_NOW,
+        ActionFamily.ATTACK_LATER,
+        ActionFamily.PROBE,
+    ):
+        return 2.5
+    return 0.0
 
 
 def _target_speed(family: ActionFamily, current_speed: float) -> float:
@@ -199,6 +211,7 @@ class PosteriorMeanPlanner:
             reason_codes=["POSTERIOR_MEAN"],
             action_values={f.value: c for f, c in costs.items()},
             runtime_s=time.perf_counter() - start,
+            lateral_target_m=_target_lateral(best),
         )
 
     def notify_gap_change(self, gap_closed_m: float) -> None:
@@ -298,6 +311,7 @@ class AmbiguityAwareController:
         self.last_family = ActionFamily.REFERENCE
         self.last_probe_s = float("-inf")
         self.excluded_mass = 0.0
+        self._last_lateral_m = 0.0
 
     def decide(self, decision_input: DecisionInput, budget_s: float) -> Decision:
         start = time.perf_counter()
@@ -353,6 +367,7 @@ class AmbiguityAwareController:
                 return self._retain(
                     decision_input, "PLAN_INVALID", start, result, extra=plan_problems
                 )
+            self._last_lateral_m = _target_lateral(best)
             return Decision(
                 family=best,
                 p_k_dc_w=power,
@@ -363,6 +378,7 @@ class AmbiguityAwareController:
                 runtime_s=time.perf_counter() - start,
                 search_iterations=result.iterations,
                 timed_out=result.timed_out,
+                lateral_target_m=self._last_lateral_m,
             )
 
         # layer 4b: bounded information-gathering probe.
@@ -385,6 +401,7 @@ class AmbiguityAwareController:
                     return self._retain(
                         decision_input, "PLAN_INVALID", start, result, extra=plan_problems
                     )
+                self._last_lateral_m = _target_lateral(ActionFamily.PROBE)
                 return Decision(
                     family=ActionFamily.PROBE,
                     p_k_dc_w=power,
@@ -396,6 +413,7 @@ class AmbiguityAwareController:
                     runtime_s=time.perf_counter() - start,
                     search_iterations=result.iterations,
                     timed_out=result.timed_out,
+                    lateral_target_m=self._last_lateral_m,
                 )
 
         return self._retain(decision_input, REASON_NO_IMPROVEMENT, start, result)
@@ -455,6 +473,11 @@ class AmbiguityAwareController:
             runtime_s=time.perf_counter() - start,
             search_iterations=result.iterations if result else 0,
             timed_out=result.timed_out if result else False,
+            # Hold the side offset while alongside, so the ego does not steer
+            # back into a rival it is passing; recentre once clearly clear.
+            lateral_target_m=(
+                self._last_lateral_m if abs(decision_input.gap_m) < 8.0 else 0.0
+            ),
         )
 
     # -- causal feedback ---------------------------------------------------
@@ -484,4 +507,5 @@ def _decision_from_search(
         runtime_s=elapsed,
         search_iterations=result.iterations,
         timed_out=result.timed_out,
+        lateral_target_m=_target_lateral(family),
     )

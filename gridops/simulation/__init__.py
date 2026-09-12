@@ -13,6 +13,16 @@ from .battery import (
 )
 from .plant import Plant, PlantStep, initial_state
 from .track import TrackReference, build_track, synthetic_circuit
+from .geometry import (
+    Footprint,
+    PassMonitor,
+    PassOutcome,
+    Pose,
+    TrackPath,
+    footprint_corners,
+    footprint_within_track,
+    rectangles_overlap,
+)
 
 __all__ = [
     "TerminalPowerResult",
@@ -30,4 +40,12 @@ __all__ = [
     "TrackReference",
     "build_track",
     "synthetic_circuit",
+    "Footprint",
+    "PassMonitor",
+    "PassOutcome",
+    "Pose",
+    "TrackPath",
+    "footprint_corners",
+    "footprint_within_track",
+    "rectangles_overlap",
 ]
