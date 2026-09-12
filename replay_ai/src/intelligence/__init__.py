@@ -27,6 +27,7 @@ from .closed_loop import (
     HiddenRivalMode, SimulationConfig, CarState, PublicSimulationObservation,
     SimulationStep, ClosedLoopSimulator,
 )
+from .socp_envelope import SOCPConfig, SOCPPoint, SOCPProfile, SOCPPerformanceEnvelope
 from .control_layers import (
     EnvelopeConfig, EnvelopePoint, PerformanceEnvelope, ScenarioAction,
     Level2Plan, BoundedScenarioPlanner, Level1Command, FastExecutionController,
@@ -73,6 +74,10 @@ __all__ = [
     "StrategyConfig",
     "RaceEnergyPlanner",
     "extract_lap_samples",
+    "SOCPConfig",
+    "SOCPPoint",
+    "SOCPProfile",
+    "SOCPPerformanceEnvelope",
     "EnvelopeConfig",
     "EnvelopePoint",
     "PerformanceEnvelope",

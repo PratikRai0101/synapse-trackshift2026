@@ -187,13 +187,14 @@ Fitting a pooled within-mode standard deviation per feature
    SOH now scales usable Level 3 energy, adds resistance/wear cost, and fades
    under closed-loop throughput. The constants are not yet fitted to cell or
    race battery data.
-6. **Levels 2 and 1 are transparent reference baselines, not production
-   optimizers.** `lap_strategy.py` provides a fitted empirical lap-time map and
-   finite-horizon battery allocation DP. `control_layers.py` provides a bounded
-   grip envelope, three-action scenario planner, and pedal-aware execution
-   cues. None is yet a validated SOCP/POMCP/MPC implementation, and Level 3 is
-   not yet trained from a multi-race lap dataset or wired into the dashboard.
-6. **The season SOH model is a reference stub.** It is a small finite-horizon DP
-   with indicative constants, not a validated degradation model.
-7. **No closed loop.** Rival actions do not react to ego actions; the model is
-   still driven by replayed or synthetic observations.
+6. **Level 2 now has an explicit SOC envelope baseline, but not full POMCP.**
+   `socp_envelope.py` projects requested speed/longitudinal acceleration onto
+   the tyre cone and reports primal residuals. `control_layers.py` uses it as
+   the feasibility checker with a bounded three-action scenario planner. It is
+   not yet a full spatial SOCP/POMCP implementation. Level 1 remains a
+   reference cue controller rather than validated MPC.
+7. **The season SOH model is a reference degradation model.** It is a small
+   finite-horizon DP with indicative constants, not a validated cell model.
+8. **The closed loop is a development simulator.** It is action-responsive and
+   hides rival mode from the controller, but does not yet model full vehicle
+   geometry, tyres, pit stops, dirty air or real rival strategy.
