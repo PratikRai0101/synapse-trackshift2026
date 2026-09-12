@@ -218,6 +218,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--rival-policy", default=None)
     run.add_argument("--seed", type=int, default=1)
     run.add_argument("--show", action="store_true", help="print the decision timeline")
+    run.add_argument("--out", default=None, help="write the full run record as JSON")
 
     bench = sub.add_parser("benchmark", help="paired controller x rival-policy batch")
     bench.add_argument("path")
@@ -246,6 +247,11 @@ def main(argv: list[str] | None = None) -> int:
     report.add_argument("--out", default=None)
     report.add_argument("--markdown", default=None)
 
+    html = sub.add_parser("export-html", help="render recorded runs as a web page")
+    html.add_argument("--runs", nargs="*", default=[], help="run JSON files from 'run --out'")
+    html.add_argument("--bundle", default=None, help="pitch bundle JSON from 'report'")
+    html.add_argument("--out", required=True)
+
     args = parser.parse_args(argv)
 
     if args.command == "validate-config":
@@ -271,6 +277,14 @@ def main(argv: list[str] | None = None) -> int:
             _print_timeline(report)
         else:
             print(json.dumps(report.summary(), indent=2))
+        if args.out:
+            payload = {
+                "label": f"{args.controller} vs {policy_name}",
+                "summary": report.summary(),
+                "decisions": report.decisions,
+                "trace": report.trace,
+            }
+            Path(args.out).write_text(json.dumps(payload, indent=2))
         return 0
 
     if args.command == "benchmark":
@@ -330,6 +344,15 @@ def main(argv: list[str] | None = None) -> int:
         if args.markdown:
             Path(args.markdown).write_text(markdown)
         print(markdown)
+        return 0
+
+    if args.command == "export-html":
+        from .presentation.html import load_json, write_report
+
+        runs = [load_json(path) for path in args.runs]
+        bundle = load_json(args.bundle) if args.bundle else None
+        write_report(runs, bundle, args.out)
+        print(json.dumps({"ok": True, "output": args.out, "runs": len(runs)}, indent=2))
         return 0
 
     return 2

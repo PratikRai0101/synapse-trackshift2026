@@ -43,7 +43,39 @@ Without `--show` you get JSON, which is what a script or UI would consume.
 
 Validation refuses an incomplete manifest rather than guessing.
 
-## 5. Run a batch and generate the numbers
+## 5. See it in the browser
+
+Generate records from real episodes, then render a self-contained page:
+
+```sh
+.venv/bin/python -m gridops.cli run configs/scenario_synthetic.json \
+    --controller reference --rival-policy matching --seed 1 \
+    --out artifacts/runs/reference_matching.json
+.venv/bin/python -m gridops.cli run configs/scenario_synthetic.json \
+    --controller ambiguity_aware --rival-policy matching --seed 1 \
+    --out artifacts/runs/m_matching.json
+.venv/bin/python -m gridops.cli run configs/scenario_synthetic.json \
+    --controller ambiguity_aware --rival-policy conserving --seed 1 \
+    --out artifacts/runs/m_conserving.json
+
+.venv/bin/python -m gridops.cli export-html \
+    --runs artifacts/runs/reference_matching.json artifacts/runs/m_matching.json artifacts/runs/m_conserving.json \
+    --bundle artifacts/pitch_bundle.json \
+    --out artifacts/gridops_report.html
+
+open artifacts/gridops_report.html
+```
+
+The page is a single self-contained file: no server, no network, no external
+assets. It shows, per run: the decision timeline with status colours and reason
+codes, the belief's strong-rival mass, and charts for gap, speed, deployment
+power, usable energy and tyre temperature. It then shows the frozen batch tables
+and the claim ledger.
+
+The view reads recorded runs and never recomputes a recommendation. A missing
+field renders as *unavailable*, not as zero.
+
+## 6. Run a batch and generate the numbers
 
 ```sh
 # development split, 10 seeds, the main controllers
@@ -68,7 +100,7 @@ Validation refuses an incomplete manifest rather than guessing.
 
 Each batch takes about 60 s for 10 seeds x 5 policies x 5 controllers.
 
-## 6. Sweep a parameter
+## 7. Sweep a parameter
 
 The contact margin is the one to understand:
 
@@ -83,7 +115,7 @@ At `0.0` the held-out split produces contacts; at `0.15` it does not. That
 sensitivity is a result, not a bug: the method operates near the contact
 boundary.
 
-## 7. What the outputs mean
+## 8. What the outputs mean
 
 | Field | Meaning |
 |---|---|
@@ -95,10 +127,11 @@ boundary.
 | `completion_rate` | fraction of episodes that ran. Failures are retained, never dropped. |
 | `paired gap delta` | per-seed difference against the reference baseline. |
 
-## 8. Where things live
+## 9. Where things live
 
 | Want | Look at |
 |---|---|
+| The GUI | `artifacts/gridops_report.html` |
 | The pitch | `docs/PITCH.md` |
 | The generated numbers | `artifacts/pitch_results.md`, `artifacts/pitch_bundle.json` |
 | What is built and what is not | `HANDOFF.md` |
@@ -106,7 +139,7 @@ boundary.
 | Submission checklist | `docs/SUBMISSION.md` |
 | The spec | `docs/development/` |
 
-## 9. A five-minute tour
+## 10. A five-minute tour
 
 ```sh
 .venv/bin/python -m pytest -q
