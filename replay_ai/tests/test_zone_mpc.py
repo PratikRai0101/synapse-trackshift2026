@@ -16,6 +16,24 @@ def test_zone_mpc_zeroes_power_when_already_over_speed_zone():
     assert result.power_fraction == 0.0
 
 
+def test_actuator_aware_mpc_exposes_regen_brake_thermal_and_residuals():
+    config = ZoneMPCConfig(battery_temperature=70.0)
+    result = ZoneMPC(config).solve(320.0, 70.0, 250.0)
+    assert result.success
+    assert result.brake_fraction >= 0.0
+    assert result.regen_fraction >= 0.0
+    assert len(result.predicted_temperatures) == config.horizon
+    assert result.max_constraint_residual <= 1e-8
+
+
+def test_mpc_rate_limits_first_power_command():
+    controller = ZoneMPC(ZoneMPCConfig(max_power_rate_per_s=1.0))
+    controller.previous_power = 0.0
+    result = controller.solve(200.0, 70.0, 350.0)
+    assert result.success
+    assert result.power_fraction <= 0.01 + 1e-8
+
+
 def test_level1_attaches_mpc_action_to_driver_cue():
     command, result = FastExecutionController().track_zone(
         lambda_kin=-0.2, lambda_b=1.0, pedal_pct=100,
