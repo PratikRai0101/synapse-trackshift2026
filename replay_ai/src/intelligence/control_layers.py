@@ -13,6 +13,7 @@ from typing import Mapping, Sequence
 from .hierarchical import ERSMode, HMMResult
 from .socp_envelope import SOCPConfig, SOCPPerformanceEnvelope
 from .scenario_search import BoundedPOMCP, SearchConfig
+from .zone_mpc import ZoneMPC, ZoneMPCConfig, ZoneMPCResult
 
 
 @dataclass(frozen=True)
@@ -136,14 +137,17 @@ class Level1Command:
     electric_power_fraction: float
     regen_fraction: float
     constrained: bool
+    mpc_power_fraction: float | None = None
 
 
 class FastExecutionController:
     """Bounded Level 1 cue/power split reference."""
 
-    def __init__(self, eta_deploy: float = 0.95, eta_regen: float = 0.65) -> None:
+    def __init__(self, eta_deploy: float = 0.95, eta_regen: float = 0.65,
+                 mpc_config: ZoneMPCConfig | None = None) -> None:
         self.eta_deploy = max(1e-6, eta_deploy)
         self.eta_regen = max(1e-6, eta_regen)
+        self.mpc = ZoneMPC(mpc_config)
 
     def command(self, lambda_kin: float, lambda_b: float,
                 pedal_pct: float, target_speed_kmh: float,
@@ -170,3 +174,16 @@ class FastExecutionController:
             engine, electric = 1.0, 0.0
         regen = 1.0 if cue == "REGEN BRAKE" else 0.0
         return Level1Command(cue, engine, electric, regen, constrained)
+
+    def track_zone(self, lambda_kin: float, lambda_b: float,
+                   pedal_pct: float, target_speed_kmh: float,
+                   current_speed_kmh: float, energy: float,
+                   target_energy: float | None = None) -> tuple[Level1Command, ZoneMPCResult]:
+        """Run the LP zone MPC and attach its first action to the cue."""
+        cue = self.command(lambda_kin, lambda_b, pedal_pct,
+                           target_speed_kmh, current_speed_kmh)
+        zone = self.mpc.solve(current_speed_kmh, energy, target_speed_kmh,
+                              target_energy)
+        return Level1Command(cue.cue, cue.engine_power_fraction,
+                             cue.electric_power_fraction, cue.regen_fraction,
+                             cue.constrained, zone.power_fraction), zone

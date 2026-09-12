@@ -29,6 +29,7 @@ from .closed_loop import (
 )
 from .socp_envelope import SOCPConfig, SOCPPoint, SOCPProfile, SOCPPerformanceEnvelope
 from .scenario_search import ACTIONS, SearchConfig, SearchResult, BoundedPOMCP
+from .zone_mpc import ZoneMPCConfig, ZoneMPCResult, ZoneMPC
 from .control_layers import (
     EnvelopeConfig, EnvelopePoint, PerformanceEnvelope, ScenarioAction,
     Level2Plan, BoundedScenarioPlanner, Level1Command, FastExecutionController,
@@ -83,6 +84,9 @@ __all__ = [
     "SearchConfig",
     "SearchResult",
     "BoundedPOMCP",
+    "ZoneMPCConfig",
+    "ZoneMPCResult",
+    "ZoneMPC",
     "EnvelopeConfig",
     "EnvelopePoint",
     "PerformanceEnvelope",
