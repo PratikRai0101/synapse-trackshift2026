@@ -7,7 +7,7 @@ imported here.
 
 ## What is built and passing
 
-62 tests, `python -m pytest`. See `gridops/README.md` for the module table.
+86 tests, `python -m pytest`. See `gridops/README.md` for the module table.
 
 Working and verified:
 
@@ -37,6 +37,12 @@ Working and verified:
   containment, and a pass monitor requiring clearance margin plus persistence
   with no contact or track exit. Order changes without those are `catch_up`.
   The model immediately reclassified every earlier "pass" as a contact.
+- **Tyre compound thermal and wear model** (`simulation/tyres.py`): per-axle
+  effective temperature and non-decreasing wear proxy, compound families, a
+  bounded grip map with a thermal optimum and monotone wear penalty, and a set
+  reset that touches only tyre state. Coupled into the plant's grip envelope.
+  The **R09 paired ablation** shows wear 0 → 0.9 grows the gap 69 → 105 m and
+  grip saturations 83 → 162.
 - Deterministic episode runner and a public-only decision input.
 - Leakage gate: hidden rival state and future samples cannot reach the controller.
 - CLI: `validate-config`, `run`, `benchmark`.
@@ -45,20 +51,19 @@ Working and verified:
 
 `python -m gridops.cli benchmark configs/scenario_synthetic.json --seed 1`
 
-| controller | matching spent J | conserving spent J | clean passes (conserving, 25 s) |
-|---|---:|---:|---:|
-| reference | 125 023 | 125 023 | 0 |
-| stationary (B_stat) | 2 087 581 | 678 013 | 0 (contacts) |
-| posterior_mean (B_mean) | 1 987 540 | 577 758 | 0 (contacts) |
-| convex (planner only) | 1 416 304 | 1 416 304 | 0 (contacts) |
-| ambiguity_aware (M, fixed powers) | 425 699 | 425 699 | 0 (catch-up only) |
-| ambiguity_aware_convex (M, planner-realized) | 352 733 | 352 733 | 0 (catch-up only) |
+| controller | matching spent J | conserving spent J | contacts (conserving) | verdict |
+|---|---:|---:|---:|---|
+| reference | 125 023 | 125 023 | 0 | no attack |
+| stationary (B_stat) | 2 087 581 | 678 013 | 414 | over-commits, drives through |
+| posterior_mean (B_mean) | 1 987 540 | 828 978 | 373 | over-commits, drives through |
+| convex (planner only) | 1 416 304 | 1 416 304 | 463 | drives through |
+| ambiguity_aware (M, fixed powers) | 425 699 | 425 699 | **0** | catch-up, clean |
+| ambiguity_aware_convex (M, planner-realized) | 352 733 | 352 733 | **0** | catch-up, clean |
 
-After the geometry gate was added, the earlier "pass" counts became contacts:
-the cars were overlapping when order changed. At 25 s the guarded controllers
-reach catch-up only; extending the episode to 70 s produces one clean pass and
-one re-pass with the same controller. This is the honest R13 state, not a
-tuning failure.
+With the geometry and tyre models active the picture is: every baseline that
+actually engages spends 0.7–2.1 MJ and incurs 370–460 contact frames (it drives
+through the rival), while M spends ~0.4 MJ, incurs zero contacts and reaches
+catch-up. One seed, one synthetic circuit — a smoke test, not a result.
 
 ## Known limitations (do not hide these)
 
@@ -76,8 +81,9 @@ tuning failure.
 3. **The surrogate is not validated against the plant.** POMCP ranks candidates
    on the surrogate; the nonlinear plant executes them. Model mismatch is not
    yet measured or reported per decision.
-4. **Tyres and thermal state are absent from the plant.** The battery thermal
-   state exists; tyre compound/thermal/wear does not.
+4. **Tyres are now in the plant; pit stops are not.** Compound thermal/wear
+   affects grip and the R09 ablation passes. There is no pit-stop event that
+   calls `reset_for_new_set`, and no compound choice optimisation.
 5. **No public replay adapter.** The config produces synthetic observations;
    the replay repo would supply real ones.
 6. **The planner realization is more frugal but does not yet close.**

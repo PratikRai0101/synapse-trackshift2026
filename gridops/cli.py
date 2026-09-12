@@ -29,6 +29,7 @@ from .evaluation.runner import EpisodeConfig, EpisodeRunner
 from .race_value.lap_map import default_terminal_value
 from .simulation.rivals import RivalPolicy
 from .simulation.track import synthetic_circuit
+from .simulation.tyres import default_tyre_params
 
 REQUIRED_KEYS = (
     "schema_version",
@@ -120,6 +121,9 @@ def _build_runner(data: dict[str, Any]) -> EpisodeRunner:
         initial_speed_mps=data["initial_speed_mps"],
         laps_remaining=data["laps_remaining"],
         run_mode=data["run_mode"],
+        compound=data.get("compound", "medium"),
+        compound_identity=data.get("compound_identity", "C4"),
+        initial_wear=data.get("initial_wear", 0.0),
     )
     return EpisodeRunner(
         track=synthetic_circuit(),
@@ -127,6 +131,7 @@ def _build_runner(data: dict[str, Any]) -> EpisodeRunner:
         battery=battery,
         terminal_value=default_terminal_value(battery),
         config=config,
+        tyre_params=default_tyre_params(),
     )
 
 

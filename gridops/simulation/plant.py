@@ -31,6 +31,12 @@ from ..contracts.state import (
     downforce_n,
 )
 from .battery import solve_terminal_power, integrate as integrate_battery
+from .tyres import (
+    TyreParams,
+    compounded_grip_multiplier,
+    integrate as integrate_tyres,
+    utilisation_stress,
+)
 
 MIN_TRACKING_SPEED_MPS = 3.0
 SPEED_ERROR_GAIN_PER_S = 1.5
@@ -62,6 +68,7 @@ class Plant:
     vehicle: VehicleParams
     battery: BatteryParams
     track: Track
+    tyre_params: TyreParams | None = None
 
     def mass_kg(self, state: VehicleState) -> float:
         return self.vehicle.mass_kg + state.fuel_kg
@@ -117,7 +124,12 @@ class Plant:
         # --- combined grip envelope.
         fz = mass * 9.80665 + downforce_n(v, self.vehicle)
         f_lat = mass * v * v * abs(kappa)
-        f_long_limit = math.sqrt(max(0.0, (self.vehicle.mu_base * fz) ** 2 - f_lat**2))
+        mu_eff = self.vehicle.mu_base
+        if state.tyres is not None and self.tyre_params is not None:
+            mu_eff = self.vehicle.mu_base * compounded_grip_multiplier(
+                state.tyres, self.tyre_params
+            )
+        f_long_limit = math.sqrt(max(0.0, (mu_eff * fz) ** 2 - f_lat**2))
         f_x = f_engine + f_k - f_brake
         f_x_clamped = max(-f_long_limit, min(f_long_limit, f_x))
         violation = abs(f_x) - abs(f_x_clamped)
@@ -146,8 +158,18 @@ class Plant:
         )
         lateral_new = max(-lateral_limit, min(lateral_limit, lateral_new))
 
+        # --- tyre thermal state and irreversible wear.
+        new_tyres = state.tyres
+        if state.tyres is not None and self.tyre_params is not None:
+            capacity = max(1.0, self.vehicle.mu_base * fz)
+            stress_front = utilisation_stress(0.3 * f_x_clamped, f_lat, fz, self.vehicle.mu_base)
+            stress_rear = utilisation_stress(0.7 * f_x_clamped, f_lat, fz, self.vehicle.mu_base)
+            new_tyres = integrate_tyres(
+                state.tyres, stress_front, stress_rear, v_new, dt_s, self.tyre_params
+            )
+
         return PlantStep(
-            state=VehicleState(s_new, v_new, fuel_new, battery_new, lateral_new),
+            state=VehicleState(s_new, v_new, fuel_new, battery_new, lateral_new, new_tyres),
             requested_p_k_dc_w=control.p_k_dc_w,
             realized_p_k_dc_w=realized_p_k_dc,
             terminal_power_w=power.power_w,
@@ -173,11 +195,15 @@ class Plant:
 
 
 def initial_state(
-    battery: BatteryParams, progress_m: float = 0.0, speed_mps: float = 80.0
+    battery: BatteryParams,
+    progress_m: float = 0.0,
+    speed_mps: float = 80.0,
+    tyres=None,
 ) -> VehicleState:
     return VehicleState(
         progress_m=progress_m,
         speed_mps=speed_mps,
         fuel_kg=0.0,
         battery=BatteryState(soc=battery.soc_initial, temp_k=battery.coolant_temp_k),
+        tyres=tyres,
     )

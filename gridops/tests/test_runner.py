@@ -154,6 +154,32 @@ def test_planner_failure_falls_back_with_a_reason() -> None:
     assert any("PLAN_INVALID" in d["reason_codes"] for d in fallbacks)
 
 
+def test_r09_worn_tyres_degrade_the_episode_outcome() -> None:
+    """R09: a worn set reduces grip, so pace falls and saturation rises."""
+    from gridops.simulation.tyres import default_tyre_params
+
+    battery = BatteryParams()
+
+    def run(wear: float):
+        cfg = EpisodeConfig(
+            duration_s=25.0, dt_s=0.05, replan_interval_s=1.0,
+            decision_budget_s=0.1, initial_wear=wear,
+        )
+        runner = EpisodeRunner(
+            synthetic_circuit(), VehicleParams(), battery,
+            default_terminal_value(battery), cfg,
+            tyre_params=default_tyre_params(),
+        )
+        return runner.run(ReferenceController(), rival_policy=RivalPolicy.MATCHING, seed=1)
+
+    fresh = run(0.0)
+    worn = run(0.9)
+    assert worn.ego_final_progress_m < fresh.ego_final_progress_m
+    assert worn.saturation_counts.get("grip_limit", 0) > fresh.saturation_counts.get(
+        "grip_limit", 0
+    )
+
+
 def test_belief_shifts_toward_a_strong_rival_after_failed_attempts() -> None:
     belief = RivalBelief.uniform()
     before = belief.strong_rival_mass()

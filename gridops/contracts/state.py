@@ -14,8 +14,12 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import TYPE_CHECKING
 
 from .units import KELVIN_OFFSET
+
+if TYPE_CHECKING:  # avoid a runtime import cycle with the tyre model
+    from ..simulation.tyres import TyreSetState
 
 
 class ActionFamily(str, Enum):
@@ -92,6 +96,7 @@ class VehicleState:
     fuel_kg: float
     battery: BatteryState
     lateral_m: float = 0.0
+    tyres: "TyreSetState | None" = None
 
     def copy(self) -> "VehicleState":
         return VehicleState(
@@ -100,6 +105,7 @@ class VehicleState:
             self.fuel_kg,
             self.battery.copy(),
             self.lateral_m,
+            self.tyres.copy() if self.tyres is not None else None,
         )
 
 
