@@ -41,6 +41,8 @@ export function Hud() {
   const paused = useViewerStore((state) => state.paused);
   const cameraMode = useViewerStore((state) => state.cameraMode);
   const setCameraMode = useViewerStore((state) => state.setCameraMode);
+  const followedDriver = useViewerStore((state) => state.followedDriver);
+  const setFollowedDriver = useViewerStore((state) => state.setFollowedDriver);
   const carScale = useViewerStore((state) => state.carScale);
   const setCarScale = useViewerStore((state) => state.setCarScale);
   const showLabels = useViewerStore((state) => state.showLabels);
@@ -82,12 +84,20 @@ export function Hud() {
           CAM: {cameraMode.toUpperCase()}
         </button>
         <button
+          className={`hud__button ${followedDriver ? "hud__button--on" : ""}`}
+          type="button"
+          title="Return the follow camera to the live race leader"
+          onClick={() => setFollowedDriver(null)}
+        >
+          FOLLOW: {followedDriver ?? "LEADER"}
+        </button>
+        <button
           className="hud__button"
           type="button"
           onClick={() => {
-            const steps = [1, 2, 3, 5, 8];
+            const steps = [1, 1.5, 2, 3, 5];
             const next = steps[(steps.indexOf(carScale) + 1) % steps.length];
-            setCarScale(next ?? 3);
+            setCarScale(next ?? 1);
           }}
         >
           SIZE: {carScale}x
@@ -104,7 +114,13 @@ export function Hud() {
       {leaderboard.length > 0 && (
         <aside className="hud__board">
           {leaderboard.map(([code, driver]) => (
-            <div className="row" key={code}>
+            <button
+              className={`row ${followedDriver === code ? "row--selected" : ""}`}
+              key={code}
+              type="button"
+              title={`Follow ${code}`}
+              onClick={() => setFollowedDriver(code)}
+            >
               <span className="row__pos">{driver.position}</span>
               <span
                 className="row__chip"
@@ -119,7 +135,7 @@ export function Hud() {
               >
                 {TYRE_LABEL[Math.round(driver.tyre)] ?? "?"}
               </span>
-            </div>
+            </button>
           ))}
         </aside>
       )}

@@ -60,6 +60,8 @@ interface ViewerState {
   paused: boolean;
   speed: number;
   cameraMode: CameraMode;
+  /** Null keeps the chase camera on the live race leader. */
+  followedDriver: string | null;
   /**
    * Car size multiplier. A real car is ~5.6 m against a ~4 km circuit, i.e.
    * sub-pixel from the overview camera. Exaggerating the model is the 3D
@@ -69,6 +71,7 @@ interface ViewerState {
   showLabels: boolean;
   setConnected: (connected: boolean) => void;
   setCameraMode: (mode: CameraMode) => void;
+  setFollowedDriver: (code: string | null) => void;
   setCarScale: (scale: number) => void;
   toggleLabels: () => void;
   apply: (message: TelemetryMessage) => void;
@@ -90,11 +93,16 @@ export const useViewerStore = create<ViewerState>((set) => ({
   paused: false,
   speed: 1,
   cameraMode: "orbit",
-  carScale: 2,
+  followedDriver: null,
+  // Keep cars at physical scale by default. Enlarged cars overlap at normal
+  // racing gaps and look as if they are colliding.
+  carScale: 1,
   showLabels: true,
 
   setConnected: (connected) => set({ connected }),
   setCameraMode: (cameraMode) => set({ cameraMode }),
+  setFollowedDriver: (followedDriver) =>
+    set({ followedDriver, cameraMode: "follow" }),
   setCarScale: (carScale) => set({ carScale }),
   toggleLabels: () => set((state) => ({ showLabels: !state.showLabels })),
 

@@ -10,11 +10,11 @@ import { sceneX, sceneZ } from "./world";
  * smoothed on its own, which meant the camera chased a slightly different
  * position and heading than the car it was framing.
  *
- * Heading comes from an exponentially smoothed velocity *vector*, not from a
- * single frame-to-frame position delta. A single delta is dominated by
- * floating-point noise at low speed and swings wildly between updates; because
- * the follow camera sits `back` metres behind the car, even a few degrees of
- * heading noise becomes tens of metres of lateral camera movement per frame.
+ * Heading comes from the track tangent when geometry is available, with an
+ * exponentially smoothed velocity *vector* as fallback. A single position
+ * delta is dominated by floating-point noise at low speed and swings wildly
+ * between updates; because the follow camera sits `back` metres behind the car,
+ * even a few degrees of heading noise becomes visible lateral movement.
  */
 
 export interface Actor {
@@ -34,6 +34,8 @@ export interface ActorEntry {
   x: number;
   y: number;
   scale: number;
+  /** Stable direction supplied by track geometry when available. */
+  heading?: number | null;
 }
 
 /** A jump larger than this is a seek (rewind / high playback speed), not motion. */
@@ -78,7 +80,7 @@ export function simulateActors(
         key: entry.key,
         position: new THREE.Vector3(targetX, 0, targetZ),
         target: new THREE.Vector3(targetX, 0, targetZ),
-        heading: 0,
+        heading: entry.heading ?? 0,
         velocityX: 0,
         velocityY: 0,
         lastX: entry.x,
@@ -97,7 +99,12 @@ export function simulateActors(
 
     const jumped = actor.position.distanceTo(actor.target) > SNAP_DISTANCE;
 
-    if (dx * dx + dy * dy > MOVEMENT_EPSILON) {
+    if (entry.heading != null && Number.isFinite(entry.heading)) {
+      actor.heading = jumped
+        ? entry.heading
+        : actor.heading +
+          shortestAngle(actor.heading, entry.heading) * HEADING_ALPHA;
+    } else if (dx * dx + dy * dy > MOVEMENT_EPSILON) {
       actor.velocityX += (dx - actor.velocityX) * VELOCITY_ALPHA;
       actor.velocityY += (dy - actor.velocityY) * VELOCITY_ALPHA;
 
