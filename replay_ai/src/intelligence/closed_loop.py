@@ -23,6 +23,7 @@ class SimulationConfig:
     drag_kmh_s: float = 2.0
     battery_burn_per_s: float = 1.2
     battery_harvest_per_s: float = 0.7
+    steps_per_lap: int = 20
 
 
 @dataclass
@@ -56,13 +57,18 @@ class ClosedLoopSimulator:
 
     def __init__(self, rival_mode: HiddenRivalMode = HiddenRivalMode.MATCH,
                  config: SimulationConfig | None = None,
-                 hmm_artifact: str | None = None) -> None:
+                 hmm_artifact: str | None = None,
+                 lap_map_artifact: str | None = None) -> None:
         self.config = config or SimulationConfig()
         self.rival_mode = rival_mode  # simulation truth; never passed to model
         self.ego = CarState(280.0, 1.0, 70.0)
         self.rival = CarState(280.0, 1.0, 70.0)
         self.time_s = 0.0
-        self.model = MotorsportIntelligence(hmm_artifact=hmm_artifact)
+        self.step_index = 0
+        self.current_lap = 1
+        self.lap_deployed = 0.0
+        self.model = MotorsportIntelligence(hmm_artifact=hmm_artifact,
+                                             lap_map_artifact=lap_map_artifact)
 
     def _observation(self) -> RivalTelemetry:
         # Only the rival's public channels enter the model. Rival SOC/mode is
@@ -83,6 +89,7 @@ class ClosedLoopSimulator:
             brake=0.0,
             gap_s=max(0.0, self.ego.gap_s),
             active_aero=1.0 if self.ego.gap_s < 1.0 else 0.0,
+            lap=self.current_lap,
         )
 
     def step(self) -> SimulationStep:
@@ -90,9 +97,15 @@ class ClosedLoopSimulator:
         public = self._observation()
         decision = self.model.observe(public, own_speed_kmh=self.ego.speed_kmh,
                                        own_soc=self.ego.energy, gap_s=self.ego.gap_s)
-        if decision.command == "BURN" and self.ego.energy > 5.0:
+        target = decision.lap_energy_target
+        target_remaining = max(0.0, (target or 0.0) - self.lap_deployed)
+        can_deploy = target is None or target_remaining > 0.0
+        if decision.command == "BURN" and self.ego.energy > 5.0 and can_deploy:
             ego_accel = cfg.ego_accel_kmh_s + cfg.burn_bonus_kmh_s
-            energy_delta = -cfg.battery_burn_per_s
+            deployment = (min(cfg.battery_burn_per_s, target_remaining)
+                          if target is not None else cfg.battery_burn_per_s)
+            energy_delta = -deployment
+            self.lap_deployed += deployment * cfg.dt_s
         elif decision.command == "HARVEST":
             ego_accel = cfg.ego_accel_kmh_s - cfg.harvest_penalty_kmh_s
             energy_delta = cfg.battery_harvest_per_s
@@ -121,6 +134,10 @@ class ClosedLoopSimulator:
                              3.6 * cfg.dt_s / max(self.ego.speed_kmh / 3.6, 1.0))
         self.rival.gap_s = self.ego.gap_s
         self.time_s += cfg.dt_s
+        self.step_index += 1
+        if self.step_index % max(1, cfg.steps_per_lap) == 0:
+            self.current_lap += 1
+            self.lap_deployed = 0.0
         return SimulationStep(
             PublicSimulationObservation(self.time_s, public.speed_kmh,
                                         public.throttle_pct, public.brake,
