@@ -111,6 +111,7 @@ class TacticalModel:
         horizon: int,
         params: TacticalParams | None = None,
         closure_fn: Callable[[ActionFamily, RivalPolicy], float] | None = None,
+        terminal_cost_fn: Callable[[float], float] | None = None,
     ) -> None:
         self.terminal_value = terminal_value
         self.horizon = horizon
@@ -118,6 +119,9 @@ class TacticalModel:
         #: Optional calibrated closure model. When absent the declared tables
         #: below are used; the two are interchangeable by design.
         self.closure_fn = closure_fn
+        #: Optional remaining-race continuation value, keyed on usable energy.
+        #: When absent the flat terminal resource value is used instead.
+        self.terminal_cost_fn = terminal_cost_fn
 
     def actions(self, state: TacticalState) -> Sequence[ActionFamily]:
         return FAMILIES
@@ -138,10 +142,12 @@ class TacticalModel:
         return state.step >= self.horizon or state.gap_m <= self.params.pass_gap_m
 
     def terminal_cost(self, state: TacticalState) -> float:
-        return (
-            self.terminal_value.cost_s(state.energy_j)
-            + self.params.gap_price_s_per_m * state.gap_m
+        base = (
+            self.terminal_cost_fn(state.energy_j)
+            if self.terminal_cost_fn is not None
+            else self.terminal_value.cost_s(state.energy_j)
         )
+        return base + self.params.gap_price_s_per_m * state.gap_m
 
     def observation_key(self, observation: float) -> Hashable:
         return observation

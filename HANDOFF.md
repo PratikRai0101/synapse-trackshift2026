@@ -7,7 +7,7 @@ imported here.
 
 ## What is built and passing
 
-133 passing, 1 xfailed (`python -m pytest`). See `gridops/README.md` for the module table.
+135 passing, 1 xfailed (`python -m pytest`). See `gridops/README.md` for the module table.
 
 Working and verified:
 
@@ -45,7 +45,9 @@ Working and verified:
   grip saturations 83 → 162.
 - **Remaining-race value recursion** (`race_value/lap_map.py`): finite-horizon
   DP over usable energy, ``V_l(E)`` with the terminal reserve priced once at
-  ``V_0``, interpolated between grid points, out-of-domain queries flagged.
+  ``V_0``, interpolated between grid points, out-of-domain queries flagged. The
+  map is wired into the controller's tactical terminal cost, so laps remaining
+  changes what a commitment is priced against (R08).
 - **Risk criteria** (`decision/commitment.py`): CVaR of paired improvement and
   minimax regret, completing the B3 comparator set alongside the worst-case
   commitment rule.
@@ -179,13 +181,12 @@ Read this honestly:
 ## Next slices, by owner
 
 **Developer A (simulation/control)**
-1. Wire `RaceValueMap` into the controller's tactical cost so remaining-race
-   value influences the commitment directly (R08), rather than only through the
-   terminal value.
-2. Enforce the remaining rules as hard constraints: ES swing, per-lap recharge
+1. Enforce the remaining rules as hard constraints: ES swing, per-lap recharge
    and torque limit.
-3. Cache candidate profiles per valid state and benchmark cold vs warm solve
+2. Cache candidate profiles per valid state and benchmark cold vs warm solve
    time before the batch.
+3. Unify the grip envelope: the plant uses a circular envelope, the planner an
+   `rx/ry` ellipse.
 
 **Developer B (evidence/evaluation)**
 1. **Calibrate the belief likelihood.** Fit the surrogate closure means (or the

@@ -43,7 +43,7 @@ Use the venv at the repository root: `../.venv/bin/python`.
 
 ## Test coverage
 
-133 passing, 1 xfailed. Highlights:
+135 passing, 1 xfailed. Highlights:
 
 - **Battery:** OCV/current-root identity, energy conservation derivative,
   current/voltage/SOC saturation, cooling, no post-hoc SOC clipping.
@@ -77,7 +77,9 @@ Use the venv at the repository root: `../.venv/bin/python`.
 - **Race value:** terminal reserve priced once at ``V_0``, value grows with laps
   remaining, out-of-domain queries flagged not extrapolated, deploy target
   respects the reserve floor and the per-lap cap, scarce energy does not deploy
-  more than rich.
+  more than rich. The map is wired into the controller's tactical terminal cost,
+  so laps remaining changes the continuation value a commitment is priced
+  against (R08).
 - **Risk criteria:** CVaR is more conservative than the mean and equals it at
   ``alpha=1``; minimax regret selects the action with the lowest worst regret.
 - **Batch and ablations:** seeded paired rows, failures retained, completion
