@@ -90,6 +90,14 @@ def _controller(name: str, runner: EpisodeRunner, seed: int) -> Controller:
             belief=RivalBelief.uniform(),
             horizon=3,
             iterations=400,
+            seed=seed,
+        )
+    if name == "ambiguity_aware_convex":
+        return AmbiguityAwareController(
+            terminal_value=runner.terminal_value,
+            belief=RivalBelief.uniform(),
+            horizon=3,
+            iterations=400,
             planner=ConditionalConvexPlanner(
                 runner.track, runner.vehicle, runner.battery, runner.terminal_value,
                 PlannerConfig(),
@@ -134,7 +142,14 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument(
         "--controller",
         default="ambiguity_aware",
-        choices=["reference", "stationary", "posterior_mean", "convex", "ambiguity_aware"],
+        choices=[
+            "reference",
+            "stationary",
+            "posterior_mean",
+            "convex",
+            "ambiguity_aware",
+            "ambiguity_aware_convex",
+        ],
     )
     run.add_argument("--rival-policy", default=None)
     run.add_argument("--seed", type=int, default=1)
@@ -202,6 +217,9 @@ def _benchmark(data: dict[str, Any], seed: int) -> list[dict[str, Any]]:
             )
         ),
         "ambiguity_aware": lambda runner, s: AmbiguityAwareController(
+            runner.terminal_value, RivalBelief.uniform(), horizon=3, iterations=300, seed=s
+        ),
+        "ambiguity_aware_convex": lambda runner, s: AmbiguityAwareController(
             runner.terminal_value, RivalBelief.uniform(), horizon=3, iterations=300,
             planner=ConditionalConvexPlanner(
                 runner.track, runner.vehicle, runner.battery, runner.terminal_value,

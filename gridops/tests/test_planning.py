@@ -99,6 +99,18 @@ def test_infeasible_target_is_reported_not_hidden(planner: ConditionalConvexPlan
     assert not ok and problems
 
 
+def test_tight_lower_trust_forces_deployment(planner: ConditionalConvexPlanner) -> None:
+    """An attack must hold pace, so a tight lower bound forces deployment."""
+    energy = usable_energy_for_soc(0.70, planner.battery)
+    loose = planner.plan(0.0, 80.0, energy, base_speed_mps=86.0)
+    tight = planner.plan(0.0, 80.0, energy, base_speed_mps=86.0, lower_trust_dv_mps=4.0)
+    assert loose.accepted and tight.accepted
+    assert tight.deployed_energy_j > loose.deployed_energy_j
+    for k in range(1, len(tight.p_k_dc_w)):
+        v_ref = planner.reference_speed(float(tight.s_m[k]), 86.0, planner.vehicle.mass_kg)
+        assert tight.speed_mps[k] >= max(planner.config.min_speed_mps, v_ref - 4.0) - 1e-3
+
+
 def test_solver_returns_primal_residuals_and_timing(planner: ConditionalConvexPlanner) -> None:
     plan = _plan(planner, usable_energy_for_soc(0.70, planner.battery))
     assert plan.solve_time_s >= 0.0

@@ -23,7 +23,7 @@ The full design spans execution, lap/tactics, remaining race and component lifec
 | A fresh development session | [developer handoff](12-developer-handoff.md), then its selected backlog slice |
 | Terminology | [domain glossary](../../CONTEXT.md), [technical glossary](11-glossary.md) |
 
-Supporting artifacts: [architecture diagram source](architecture.mmd), [example run manifest](templates/run-manifest.example.json), [example ruleset contract](templates/ruleset.example.json), and [architectural decisions](../adr/0001-truth-observation-separation.md).
+Supporting artifacts: [architecture diagram source](architecture.mmd), [chronological architecture block diagrams](13-chronological-architecture-block-diagram.md), [example run manifest](templates/run-manifest.example.json), [example ruleset contract](templates/ruleset.example.json), and [architectural decisions](../adr/0001-truth-observation-separation.md).
 
 ## The product in one sentence
 

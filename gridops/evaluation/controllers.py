@@ -411,12 +411,21 @@ class AmbiguityAwareController:
         target = _target_speed(family, decision_input.ego_speed_mps)
         if self.planner is None:
             return _power_for_family(family, TacticalParams()), target, ()
+        # Attack families must hold pace, so they use a tight lower trust bound
+        # and therefore actually deploy; other families may trade speed away.
+        lower_trust = {
+            ActionFamily.ATTACK_NOW: 4.0,
+            ActionFamily.ATTACK_LATER: 4.5,
+            ActionFamily.PROBE: 4.0,
+            ActionFamily.DEFEND: 3.5,
+        }.get(family)
         plan = self.planner.plan(
             progress_m=decision_input.ego_progress_m,
             speed_mps=decision_input.ego_speed_mps,
             usable_energy_j=decision_input.ego_usable_energy_j,
             base_speed_mps=target,
             mass_kg=self.planner.vehicle.mass_kg,
+            lower_trust_dv_mps=lower_trust,
         )
         ok, problems = self.planner.validate_plan(plan)
         if not ok:

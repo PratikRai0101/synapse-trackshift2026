@@ -45,14 +45,15 @@ Working and verified:
 | reference | 125 023 | 125 023 | 0 |
 | stationary (B_stat) | 2 087 581 | 678 013 | 2 |
 | posterior_mean (B_mean) | 1 987 540 | 577 758 | 1 |
-| convex (planner only) | 1 099 140 | 1 099 140 | 0 |
-| ambiguity_aware (M) | 352 163 | 352 163 | 0 |
+| convex (planner only) | 1 416 304 | 1 416 304 | 0 |
+| ambiguity_aware (M, fixed powers) | 425 699 | 425 699 | 1 |
+| ambiguity_aware_convex (M, planner-realized) | 352 733 | 352 733 | 0 |
 
 The intended result is visible: the base-paper stationary planner over-commits
-(burns ~2 MJ against a defending rival for no pass), while the guarded
-controller spends ~5× less and still passes the weak rival. Treat this as a
-smoke test, not a result — one seed, one synthetic circuit, no uncertainty
-intervals.
+(burns ~2 MJ against a defending rival for no pass), the guarded fixed-power M
+spends ~5× less and passes the weak rival, and the planner-realized variant is
+more frugal still. Treat this as a smoke test, not a result — one seed, one
+synthetic circuit, no uncertainty intervals.
 
 ## Known limitations (do not hide these)
 
@@ -72,14 +73,15 @@ intervals.
    state exists; tyre compound/thermal/wear does not.
 5. **No public replay adapter.** The config produces synthetic observations;
    the replay repo would supply real ones.
-6. **The plan is realized but the pace/pass mapping is not calibrated.**
-   `AmbiguityAwareController` now calls the convex planner for the selected
-   family, so its energy spend varies by rival policy (good). But the planner
-   minimises time plus energy and has no position/gap term, so realising an
-   attack through it deploys less than the fixed attack power and does not yet
-   produce a pass that the pre-planner version did. Fix by making ATTACK target
-   the rival's pace plus a margin as a constraint, or adding a declared gap term
-   to the objective. This is the next joint task.
+6. **The planner realization is more frugal but does not yet close.**
+   `AmbiguityAwareController` supports two realizations: fixed power
+   (`ambiguity_aware`, validated, passes the weak rival) and convex profile
+   (`ambiguity_aware_convex`, lower energy, no pass yet). The planner minimises
+   time plus energy and has no position/gap term, and its lower trust bound is
+   limited by available power (bounds tighter than ~4 m/s are infeasible from
+   80 m/s). Fix by making ATTACK target the rival's pace plus a margin as a
+   constraint, or adding a declared gap term to the objective. This is the next
+   joint task.
 7. **Model mismatch is not reported per decision.** The planner's predicted
    profile and the plant's realized trajectory are not yet compared in the
    episode record.
