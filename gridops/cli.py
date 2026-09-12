@@ -16,6 +16,7 @@ from typing import Any
 
 from .contracts.state import BatteryParams, VehicleParams
 from .decision.belief import RivalBelief
+from .decision.hmm_belief import HMMBelief, HMMConfig
 from .decision.planning import ConditionalConvexPlanner, PlannerConfig
 from .evaluation.controllers import (
     AmbiguityAwareController,
@@ -105,6 +106,22 @@ def _controller(name: str, runner: EpisodeRunner, seed: int) -> Controller:
             ),
             seed=seed,
         )
+    if name == "ambiguity_aware_hmm":
+        return AmbiguityAwareController(
+            terminal_value=runner.terminal_value,
+            belief=HMMBelief(HMMConfig(stationary=False)),
+            horizon=3,
+            iterations=400,
+            seed=seed,
+        )
+    if name == "ambiguity_aware_hmm_stationary":
+        return AmbiguityAwareController(
+            terminal_value=runner.terminal_value,
+            belief=HMMBelief(HMMConfig(stationary=True)),
+            horizon=3,
+            iterations=400,
+            seed=seed,
+        )
     raise ValueError(f"unknown controller: {name}")
 
 
@@ -154,6 +171,8 @@ def main(argv: list[str] | None = None) -> int:
             "convex",
             "ambiguity_aware",
             "ambiguity_aware_convex",
+            "ambiguity_aware_hmm",
+            "ambiguity_aware_hmm_stationary",
         ],
     )
     run.add_argument("--rival-policy", default=None)
@@ -231,6 +250,14 @@ def _benchmark(data: dict[str, Any], seed: int) -> list[dict[str, Any]]:
                 PlannerConfig(),
             ),
             seed=s,
+        ),
+        "ambiguity_aware_hmm": lambda runner, s: AmbiguityAwareController(
+            runner.terminal_value, HMMBelief(HMMConfig(stationary=False)),
+            horizon=3, iterations=300, seed=s,
+        ),
+        "ambiguity_aware_hmm_stationary": lambda runner, s: AmbiguityAwareController(
+            runner.terminal_value, HMMBelief(HMMConfig(stationary=True)),
+            horizon=3, iterations=300, seed=s,
         ),
     }
     rows: list[dict[str, Any]] = []

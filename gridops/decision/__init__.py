@@ -14,6 +14,7 @@ from .commitment import (
 )
 from .pomcp import POMCP, GenerativeModel, SearchResult
 from .planning import ConditionalConvexPlanner, ConvexPlan, PlannerConfig
+from .hmm_belief import HMMBelief, HMMConfig
 
 __all__ = [
     "REASON_COOLDOWN",
@@ -32,4 +33,6 @@ __all__ = [
     "ConditionalConvexPlanner",
     "ConvexPlan",
     "PlannerConfig",
+    "HMMBelief",
+    "HMMConfig",
 ]

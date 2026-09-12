@@ -32,6 +32,7 @@ Use the venv at the repository root: `../.venv/bin/python`.
 | `decision/planning.py` | conditional convex deployment planner (CVXPY + Clarabel), DCP/residual/trust-region checks | done, tested |
 | `decision/tactical.py` | cheap surrogate generative model for POMCP | calibration open |
 | `decision/belief.py` | persistent particle belief, credible set, non-stationarity mixing | calibration open |
+| `decision/hmm_belief.py` | compact four-mode HMM, forward filtering, stationary comparator | done, tested |
 | `race_value/lap_map.py` | monotone terminal resource value, reserve band | done, tested |
 | `evaluation/controllers.py` | reference, stationary (B_stat), posterior-mean (B_mean), ambiguity-aware (M) | wired |
 | `evaluation/runner.py` | deterministic episode, public-only `DecisionInput` | done, tested |
@@ -39,7 +40,7 @@ Use the venv at the repository root: `../.venv/bin/python`.
 
 ## Test coverage
 
-86 tests. Highlights:
+95 tests. Highlights:
 
 - **Battery:** OCV/current-root identity, energy conservation derivative,
   current/voltage/SOC saturation, cooling, no post-hoc SOC clipping.
@@ -65,6 +66,11 @@ Use the venv at the repository root: `../.venv/bin/python`.
   softer compounds wear faster, grip has a thermal optimum and is monotone in
   wear, a new set resets only tyre state, and the **R09 paired ablation** shows
   a worn set reduces pace and raises grip saturation.
+- **HMM belief:** forward filtering concentrates on the explaining mode,
+  ambiguity falls with consistent evidence, `update_on_outcome` does not
+  double-count, the stationary configuration has an identity transition while
+  the non-stationary one allows switching, and a poorly explained observation
+  does not collapse the posterior.
 
 ## Conventions frozen at G0
 

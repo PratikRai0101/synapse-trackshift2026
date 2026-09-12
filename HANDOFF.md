@@ -7,7 +7,7 @@ imported here.
 
 ## What is built and passing
 
-86 tests, `python -m pytest`. See `gridops/README.md` for the module table.
+95 tests, `python -m pytest`. See `gridops/README.md` for the module table.
 
 Working and verified:
 
@@ -43,6 +43,12 @@ Working and verified:
   reset that touches only tyre state. Coupled into the plant's grip envelope.
   The **R09 paired ablation** shows wear 0 → 0.9 grows the gap 69 → 105 m and
   grip saturations 83 → 162.
+- **HMM belief backend** (`decision/hmm_belief.py`): a compact four-mode HMM
+  with forward filtering, a transition matrix encoding non-stationarity, and a
+  `stationary=True` configuration that reproduces the base-paper fixed-regime
+  assumption. Exposes the same surface as the particle belief, so M can run on
+  either backend and the two are directly comparable (`ambiguity_aware` vs
+  `ambiguity_aware_hmm` vs `ambiguity_aware_hmm_stationary`).
 - Deterministic episode runner and a public-only decision input.
 - Leakage gate: hidden rival state and future samples cannot reach the controller.
 - CLI: `validate-config`, `run`, `benchmark`.
@@ -67,12 +73,14 @@ catch-up. One seed, one synthetic circuit — a smoke test, not a result.
 
 ## Known limitations (do not hide these)
 
-1. **Belief calibration is not converged.** `decision/belief.py` updates
-   correctly in isolation, but the surrogate closure scale in
-   `decision/tactical.py` does not match the plant's observed closure, so the
-   controller's action distribution is currently dominated by the fixed probe
-   schedule (constant 425 699 J across rival policies). The information is not
-   yet changing the policy. This is the single most important open item.
+1. **Belief calibration is not converged.** The particle belief reweights
+   correctly, and the HMM gives a properly normalised posterior, but **both use
+   the same surrogate closure means** in `decision/tactical.py`, which do not
+   match the plant's observed closure. The HMM therefore carries the same
+   calibration gap. Fix by fitting the emission means to paired
+   surrogate/plant rollouts. Acceptance: against a conserving rival the
+   credible set becomes weak-dominated and M commits `attack_now`; against a
+   matching rival it retains.
 2. **Pass claims are now geometrically gated; only catch-up is reached at 25 s.**
    The geometry model exists and rejects contact/track-exit as passes. The
    guarded controller reaches catch-up within the 25 s benchmark and one clean

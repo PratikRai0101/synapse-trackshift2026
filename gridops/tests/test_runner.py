@@ -180,6 +180,23 @@ def test_r09_worn_tyres_degrade_the_episode_outcome() -> None:
     )
 
 
+def test_hmm_belief_backend_runs_end_to_end() -> None:
+    from gridops.decision.hmm_belief import HMMBelief, HMMConfig
+
+    runner = _runner()
+    controller = AmbiguityAwareController(
+        runner.terminal_value, HMMBelief(HMMConfig(stationary=False)),
+        horizon=2, iterations=120, seed=9,
+    )
+    report = runner.run(controller, rival_policy=RivalPolicy.CONSERVING, seed=1)
+    assert report.decisions
+    assert controller.belief.ambiguity_index() >= 0.0
+    assert all(
+        d["status"] in {"RECOMMEND", "RETAIN_REFERENCE", "FALLBACK", "UNAVAILABLE"}
+        for d in report.decisions
+    )
+
+
 def test_belief_shifts_toward_a_strong_rival_after_failed_attempts() -> None:
     belief = RivalBelief.uniform()
     before = belief.strong_rival_mass()
