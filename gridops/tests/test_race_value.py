@@ -88,3 +88,32 @@ def test_deploy_target_respects_the_per_lap_cap(battery: BatteryParams) -> None:
 def test_query_carries_provenance(value_map: RaceValueMap, battery: BatteryParams) -> None:
     query = value_map.query(usable_energy_for_soc(0.7, battery), 3)
     assert query.in_domain and query.provenance == "synthetic_parameter"
+
+
+def test_r08_terminal_cost_depends_on_laps_remaining(battery: BatteryParams) -> None:
+    """The tactical surrogate must see different continuation values by lap."""
+    from gridops.contracts.state import ActionFamily
+    from gridops.decision.tactical import TacticalModel, TacticalState
+    from gridops.simulation.rivals import RivalPolicy
+
+    value_map = RaceValueMap(
+        default_terminal_value(battery),
+        LapMapConfig(laps=20, n_energy_levels=81, max_energy_j=3_936_600.0),
+    )
+    short = TacticalModel(
+        default_terminal_value(battery), 3,
+        terminal_cost_fn=lambda energy: value_map.value(energy, 2),
+    )
+    long = TacticalModel(
+        default_terminal_value(battery), 3,
+        terminal_cost_fn=lambda energy: value_map.value(energy, 18),
+    )
+    state = TacticalState(energy_j=2_000_000.0, gap_m=6.0, policy=RivalPolicy.CONSERVING)
+    assert short.terminal_cost(state) != long.terminal_cost(state)
+
+
+def test_r08_deploy_target_shrinks_with_more_laps_remaining(
+    value_map: RaceValueMap, battery: BatteryParams
+) -> None:
+    energy = usable_energy_for_soc(0.6, battery)
+    assert value_map.deploy_target(energy, 2) >= value_map.deploy_target(energy, 18)

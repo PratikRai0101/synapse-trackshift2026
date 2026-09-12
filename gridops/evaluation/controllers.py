@@ -110,11 +110,13 @@ def _hypothesis_costs(
     terminal_value: TerminalValue,
     params: TacticalParams,
     closure_fn=None,
+    terminal_fn=None,
 ) -> dict[ActionFamily, list[float]]:
     """Cost of each family under each rival-policy hypothesis (deterministic)."""
     out: dict[ActionFamily, list[float]] = {}
     gap = decision_input.gap_m
     energy = decision_input.ego_usable_energy_j
+    cost_of = terminal_fn if terminal_fn is not None else terminal_value.cost_s
     for family in families:
         costs: list[float] = []
         spend = SPEND_J.get(family, 0.0)
@@ -122,7 +124,7 @@ def _hypothesis_costs(
             closure = _expected_closure(family, policy, closure_fn)
             residual_gap = max(0.0, gap - closure)
             costs.append(
-                terminal_value.cost_s(max(0.0, energy - spend))
+                cost_of(max(0.0, energy - spend))
                 + params.gap_price_s_per_m * residual_gap
             )
         out[family] = costs
@@ -291,6 +293,7 @@ class AmbiguityAwareController:
         rival_config=None,
         response_target_ceiling_mps: float = 90.0,
         contact_guard=None,
+        race_value=None,
         use_continuation_value: bool = True,
         use_belief_update: bool = True,
         use_probe: bool = True,
@@ -312,6 +315,7 @@ class AmbiguityAwareController:
         self.rival_config = rival_config or RivalPolicyConfig()
         self.response_target_ceiling_mps = response_target_ceiling_mps
         self.contact_guard = contact_guard
+        self.race_value = race_value
         self.use_belief_update = use_belief_update
         self.use_probe = use_probe
         #: Ablation switches. ``use_continuation_value=False`` prices energy at
@@ -362,6 +366,10 @@ class AmbiguityAwareController:
             for p in particles
         ]
         model = TacticalModel(self.pricing_value, self.horizon, closure_fn=self.closure_fn)
+        terminal_fn = None
+        if self.race_value is not None:
+            laps = max(0, decision_input.laps_remaining)
+            terminal_fn = lambda energy: self.race_value.value(energy, laps)  # noqa: E731
         result = POMCP(model, self.horizon, self.iterations).search(
             states, self.rng, deadline_s=budget_s
         )
@@ -371,7 +379,7 @@ class AmbiguityAwareController:
         policies = [p.policy for p in particles]
         costs = _hypothesis_costs(
             decision_input, [ActionFamily.REFERENCE, best], policies, self.pricing_value,
-            model.params, self.closure_fn,
+            model.params, self.closure_fn, terminal_fn,
         )
         if self.criterion == "posterior_mean":
             gains = [
