@@ -45,7 +45,8 @@ Working and verified:
 | reference | 125 023 | 125 023 | 0 |
 | stationary (B_stat) | 2 087 581 | 678 013 | 2 |
 | posterior_mean (B_mean) | 1 987 540 | 577 758 | 1 |
-| ambiguity_aware (M) | 425 699 | 425 699 | 1 |
+| convex (planner only) | 1 099 140 | 1 099 140 | 0 |
+| ambiguity_aware (M) | 352 163 | 352 163 | 0 |
 
 The intended result is visible: the base-paper stationary planner over-commits
 (burns ~2 MJ against a defending rival for no pass), while the guarded
@@ -71,10 +72,14 @@ intervals.
    state exists; tyre compound/thermal/wear does not.
 5. **No public replay adapter.** The config produces synthetic observations;
    the replay repo would supply real ones.
-6. **The plan is not yet realized inside M.** `ConvexPlannerController` runs the
-   planner standalone. The ambiguity-aware controller still maps action families
-   to fixed powers; it should call the planner to generate the profile for the
-   selected family.
+6. **The plan is realized but the pace/pass mapping is not calibrated.**
+   `AmbiguityAwareController` now calls the convex planner for the selected
+   family, so its energy spend varies by rival policy (good). But the planner
+   minimises time plus energy and has no position/gap term, so realising an
+   attack through it deploys less than the fixed attack power and does not yet
+   produce a pass that the pre-planner version did. Fix by making ATTACK target
+   the rival's pace plus a margin as a constraint, or adding a declared gap term
+   to the objective. This is the next joint task.
 7. **Model mismatch is not reported per decision.** The planner's predicted
    profile and the plant's realized trajectory are not yet compared in the
    episode record.
@@ -82,8 +87,8 @@ intervals.
 ## Next slices, by owner
 
 **Developer A (simulation/control)**
-1. Realize the selected family with the convex planner inside
-   `AmbiguityAwareController` (replace `_power_for_family`) and record the
+1. Calibrate the family-to-planner mapping: for ATTACK, target rival pace plus a
+   margin (or add a declared gap term), so a committed attack closes. Record the
    planner's predicted profile beside the plant's realized trajectory.
 2. Add the geometric passing model: kinematic bicycle, footprints, track
    containment, separation and persistence. Until then, every output stays

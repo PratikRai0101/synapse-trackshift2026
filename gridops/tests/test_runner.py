@@ -104,6 +104,56 @@ def test_ambiguity_aware_controller_bounds_energy_against_a_strong_rival() -> No
     )
 
 
+def test_ambiguity_aware_uses_convex_planner_when_provided() -> None:
+    """With a planner, recommended power comes from the convex profile."""
+    from gridops.decision.planning import ConditionalConvexPlanner, PlannerConfig
+
+    runner = _runner()
+    planner = ConditionalConvexPlanner(
+        runner.track, runner.vehicle, runner.battery, runner.terminal_value, PlannerConfig()
+    )
+    belief = RivalBelief.uniform()
+    with_planner = AmbiguityAwareController(
+        runner.terminal_value, belief, horizon=2, iterations=120, planner=planner, seed=4
+    )
+    report = runner.run(with_planner, rival_policy=RivalPolicy.CONSERVING, seed=5)
+    planned = [
+        d for d in report.decisions if "CONVEX_PROFILE" in d["reason_codes"]
+    ]
+    assert planned, report.decisions
+    assert all(d["status"] in {"RECOMMEND", "RETAIN_REFERENCE", "FALLBACK"} for d in report.decisions)
+
+
+def test_planner_failure_falls_back_with_a_reason() -> None:
+    class AlwaysInvalidPlanner:
+        vehicle = VehicleParams()
+
+        def plan(self, **kwargs):
+            from gridops.decision.planning import ConvexPlan
+            import numpy as np
+
+            return ConvexPlan(
+                s_m=np.zeros(3), speed_mps=np.zeros(3), p_k_dc_w=np.zeros(2),
+                terminal_energy_j=0.0, predicted_time_s=0.0, is_dcp=True,
+                status="infeasible", solve_time_s=0.0,
+                max_dynamics_residual_mj=1.0, max_grip_residual_n=1.0,
+                max_power_violation_w=1.0, deployed_energy_j=0.0,
+            )
+
+        def validate_plan(self, plan):
+            return False, ["status=infeasible"]
+
+    runner = _runner()
+    controller = AmbiguityAwareController(
+        runner.terminal_value, RivalBelief.uniform(), horizon=2, iterations=120,
+        planner=AlwaysInvalidPlanner(), seed=6,
+    )
+    report = runner.run(controller, rival_policy=RivalPolicy.CONSERVING, seed=5)
+    fallbacks = [d for d in report.decisions if d["status"] == "FALLBACK"]
+    assert fallbacks
+    assert any("PLAN_INVALID" in d["reason_codes"] for d in fallbacks)
+
+
 def test_belief_shifts_toward_a_strong_rival_after_failed_attempts() -> None:
     belief = RivalBelief.uniform()
     before = belief.strong_rival_mass()
