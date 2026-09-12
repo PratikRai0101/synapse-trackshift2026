@@ -290,6 +290,10 @@ class AmbiguityAwareController:
         response_fn=None,
         rival_config=None,
         response_target_ceiling_mps: float = 90.0,
+        use_continuation_value: bool = True,
+        use_belief_update: bool = True,
+        use_probe: bool = True,
+        criterion: str = "worst_case",
         seed: int = 0,
     ) -> None:
         self.terminal_value = terminal_value
@@ -306,6 +310,21 @@ class AmbiguityAwareController:
         self.response_fn = response_fn
         self.rival_config = rival_config or RivalPolicyConfig()
         self.response_target_ceiling_mps = response_target_ceiling_mps
+        self.use_belief_update = use_belief_update
+        self.use_probe = use_probe
+        #: Ablation switches. ``use_continuation_value=False`` prices energy at
+        #: zero, which removes the anti-attrition mechanism; ``criterion``
+        #: selects worst-case (method) or posterior-mean (B3-style) commitment.
+        self.pricing_value = (
+            terminal_value
+            if use_continuation_value
+            else TerminalValue(seconds_per_joule=0.0, reserve=terminal_value.reserve)
+        )
+        if criterion not in {"worst_case", "posterior_mean"}:
+            raise ValueError("criterion must be 'worst_case' or 'posterior_mean'")
+        self.criterion = criterion
+        if not use_probe:
+            self.ambiguity_threshold = 2.0
         self.rng = random.Random(seed)
         self.reserve_guard = ReserveGuard(terminal_value.reserve)
         self.no_progress = NoProgressGuard(repeat_threshold=4, cooldown_s=3.0)
@@ -340,7 +359,7 @@ class AmbiguityAwareController:
             )
             for p in particles
         ]
-        model = TacticalModel(self.terminal_value, self.horizon, closure_fn=self.closure_fn)
+        model = TacticalModel(self.pricing_value, self.horizon, closure_fn=self.closure_fn)
         result = POMCP(model, self.horizon, self.iterations).search(
             states, self.rng, deadline_s=budget_s
         )
@@ -349,12 +368,18 @@ class AmbiguityAwareController:
         # layer 1 (pricing): worst-case improvement across retained hypotheses
         policies = [p.policy for p in particles]
         costs = _hypothesis_costs(
-            decision_input, [ActionFamily.REFERENCE, best], policies, self.terminal_value,
+            decision_input, [ActionFamily.REFERENCE, best], policies, self.pricing_value,
             model.params, self.closure_fn,
         )
-        improvement = conservative_improvement(
-            costs[ActionFamily.REFERENCE], costs[best], self.error_allowance_s
-        )
+        if self.criterion == "posterior_mean":
+            gains = [
+                r - c for r, c in zip(costs[ActionFamily.REFERENCE], costs[best])
+            ]
+            improvement = sum(gains) / len(gains) - self.error_allowance_s
+        else:
+            improvement = conservative_improvement(
+                costs[ActionFamily.REFERENCE], costs[best], self.error_allowance_s
+            )
         if should_commit(improvement, self.commitment_margin_s):
             # layer 2: hard reserve floor
             projected = decision_input.ego_usable_energy_j - SPEND_J.get(best, 0.0)
@@ -494,8 +519,11 @@ class AmbiguityAwareController:
         at the same speed, so the sample is skipped rather than misread.
         """
         if (
-            corner_limit_mps is not None
-            and corner_limit_mps < self.response_target_ceiling_mps
+            not self.use_belief_update
+            or (
+                corner_limit_mps is not None
+                and corner_limit_mps < self.response_target_ceiling_mps
+            )
         ):
             self.belief.mix_for_non_stationarity()
             return

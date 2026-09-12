@@ -9,6 +9,16 @@ from .controllers import (
     ReferenceController,
     StationaryPlanner,
 )
+from .batch import (
+    ABLATION_NAMES,
+    CONTROLLER_NAMES,
+    BatchManifest,
+    BatchResult,
+    EpisodeRow,
+    build_controller,
+    default_manifest,
+    run_batch,
+)
 from .runner import (
     EpisodeConfig,
     EpisodeReport,
@@ -30,4 +40,12 @@ __all__ = [
     "EpisodeRunner",
     "RivalRuntime",
     "build_decision_input",
+    "ABLATION_NAMES",
+    "CONTROLLER_NAMES",
+    "BatchManifest",
+    "BatchResult",
+    "EpisodeRow",
+    "build_controller",
+    "default_manifest",
+    "run_batch",
 ]

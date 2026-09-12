@@ -26,6 +26,8 @@ from .evaluation.controllers import (
     ReferenceController,
     StationaryPlanner,
 )
+from .evaluation.batch import ABLATION_NAMES, CONTROLLER_NAMES, default_manifest, run_batch
+from .evaluation.calibration import calibrate
 from .evaluation.runner import EpisodeConfig, EpisodeRunner
 from .race_value.lap_map import default_terminal_value
 from .simulation.rivals import RivalPolicy
@@ -183,6 +185,15 @@ def main(argv: list[str] | None = None) -> int:
     bench.add_argument("--seed", type=int, default=1)
     bench.add_argument("--out", default=None, help="write JSON rows to this path")
 
+    batch = sub.add_parser("batch", help="frozen paired batch with ablations")
+    batch.add_argument("path")
+    batch.add_argument("--seeds", type=int, default=5)
+    batch.add_argument("--split", default="development")
+    batch.add_argument("--controllers", default=None, help="comma-separated")
+    batch.add_argument("--policies", default=None, help="comma-separated")
+    batch.add_argument("--no-calibrate", action="store_true")
+    batch.add_argument("--out", default=None)
+
     args = parser.parse_args(argv)
 
     if args.command == "validate-config":
@@ -217,6 +228,36 @@ def main(argv: list[str] | None = None) -> int:
         if args.out:
             Path(args.out).write_text(json.dumps(rows, indent=2))
         print(json.dumps(rows, indent=2))
+        return 0
+
+    if args.command == "batch":
+        ok, errors = validate_config(args.path)
+        if not ok:
+            print(json.dumps({"ok": False, "errors": errors}, indent=2))
+            return 1
+        data = json.loads(Path(args.path).read_text())
+        calibration = None
+        if not args.no_calibrate:
+            probe = _build_runner(data)
+            calibration = calibrate(
+                probe.track, probe.vehicle, probe.battery,
+                tyre_params=default_tyre_params(),
+            )
+        controllers = (
+            tuple(args.controllers.split(",")) if args.controllers else ABLATION_NAMES
+        )
+        policies = tuple(args.policies.split(",")) if args.policies else None
+        manifest = default_manifest(
+            seeds=tuple(range(1, args.seeds + 1)),
+            split=args.split,
+            controllers=controllers,
+            policies=policies,
+        )
+        result = run_batch(manifest, lambda: _build_runner(data), calibration)
+        payload = result.to_dict()
+        if args.out:
+            Path(args.out).write_text(json.dumps(payload, indent=2))
+        print(json.dumps({"manifest": payload["manifest"], "aggregate": payload["aggregate"]}, indent=2))
         return 0
 
     return 2
