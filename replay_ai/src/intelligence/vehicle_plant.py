@@ -19,6 +19,9 @@ class PlantConfig:
     regen_rate: float = 0.7
     thermal_gain: float = 0.08
     cooling_rate: float = 0.03
+    base_battery_resistance: float = 1.0
+    temperature_resistance_coeff: float = 0.004
+    wear_resistance_coeff: float = 0.25
     wear_rate: float = 0.0004
     initial_fuel_kg: float = 100.0
     fuel_burn_kg_per_s: float = 0.02
@@ -51,6 +54,7 @@ class PlantStep:
     longitudinal_accel: float
     lateral_accel: float
     grip_limited: bool
+    battery_resistance: float
 
 
 class VehiclePlant:
@@ -97,7 +101,12 @@ class VehiclePlant:
         lateral = speed_ms * speed_ms * abs(float(curvature))
         available_sq = max(0.0, grip * grip - lateral * lateral)
         available_longitudinal = math.sqrt(available_sq)
-        requested = cfg.max_power_accel * mass_factor * power - drag
+        battery_resistance = (cfg.base_battery_resistance +
+                              cfg.temperature_resistance_coeff *
+                              max(0.0, state.battery_temperature - 70.0) +
+                              cfg.wear_resistance_coeff * state.tyre_wear)
+        requested = (cfg.max_power_accel * mass_factor * power /
+                     max(battery_resistance, 1e-6) - drag)
         requested -= cfg.brake_accel * brake
         longitudinal = max(-cfg.brake_accel,
                            min(available_longitudinal, requested))
@@ -118,4 +127,4 @@ class VehiclePlant:
                               cfg.wear_rate * (abs(longitudinal) + lateral) * dt)
         return PlantStep(state.speed_kmh, state.energy, state.battery_temperature,
                          state.tyre_temperature, state.tyre_wear, state.distance_m,
-                         longitudinal, lateral, grip_limited)
+                         longitudinal, lateral, grip_limited, battery_resistance)
