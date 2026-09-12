@@ -7,7 +7,7 @@ imported here.
 
 ## What is built and passing
 
-121 passing, 1 xfailed (`python -m pytest`). See `gridops/README.md` for the module table.
+125 passing, 1 xfailed (`python -m pytest`). See `gridops/README.md` for the module table.
 
 Working and verified:
 
@@ -90,26 +90,29 @@ catch-up. One seed, one synthetic circuit — a smoke test, not a result.
 | controller | median gap m | mean energy J | passes | contacts | median paired Δgap m |
 |---|---:|---:|---:|---:|---:|
 | reference | 47.86 | 125 023 | 0 | 0 | 0.00 |
-| **M (full)** | **−1.39** | 1 585 979 | 1 | **1 086** | **−51.70** |
-| M − continuation value | −6.88 | 1 635 744 | 6 | 1 206 | −54.75 |
-| M − commitment margin | −2.35 | 1 683 679 | 0 | 4 272 | −49.60 |
-| M − belief update | −3.33 | 1 518 617 | 0 | 1 386 | −50.43 |
-| M − probe | −1.60 | 1 573 756 | 0 | 4 125 | −49.46 |
-| M posterior-mean criterion | −1.39 | 1 584 696 | 1 | 1 086 | −48.81 |
+| **M (full)** | **8.12** | 1 615 188 | 0 | **0** | **−39.77** |
+| M − continuation value | 7.57 | 1 573 875 | 0 | 0 | −40.29 |
+| M − commitment margin | 8.03 | 1 694 086 | 0 | 41 | −39.91 |
+| M − belief update | 20.08 | 1 425 778 | 0 | 170 | −27.78 |
+| M − probe | 15.29 | 1 501 118 | 0 | 0 | −31.78 |
+| M posterior-mean criterion | 7.66 | 1 658 493 | 0 | 0 | −41.03 |
 
 Read this honestly:
 
-- M beats the reference on position by ~52 m of median paired gap. Real for this
-  synthetic model, and the headline.
-- **M incurs ~1 086 modeled contacts**, about 14% of episode time overlapping the
-  rival. The geometry layer reports them correctly; the lateral policy does not
-  prevent them. **This is now the most important engineering defect and it must
-  not be hidden.** A position gain obtained by driving through the rival is not a
-  valid result.
-- Removing the continuation value improves position (−54.75 m) but spends and
-  contacts more: the safety/attrition trade-off the ablation was built to expose.
-- Removing the commitment margin is worst by contacts (4 272), as the
-  anti-attrition design predicts.
+- M beats the reference by ~40 m of median paired gap and now holds **zero
+  modelled contacts**. The earlier 1 086-contact result came from committing a
+  target speed that projected a collision; the contact supervisor caps the
+  committed speed so the ego moves laterally first and closes on a later cycle.
+- Removing the belief update (170 contacts) and removing the commitment margin
+  (41 contacts) still collide: the supervisor projects the rival at its observed
+  speed, so a defensive rival that *accelerates* can close faster than
+  predicted. M itself does not hit this because its committed actions are fewer
+  and better timed.
+- The remaining leverage is in the belief update (removing it costs 12 m of
+  paired gap) and the probe (removing it costs 8 m).
+- No clean passes at 25 s: catch-up only. Extending the episode produces passes,
+  as recorded in limitation 2.
+
 
 ## Known limitations (do not hide these)
 
@@ -153,12 +156,15 @@ Read this honestly:
    profile and the plant's realized trajectory are not yet compared in the
    episode record.
 
-8. **Position gain is currently obtained through contact.** The ablation batch
-   shows M beating the reference by ~52 m median paired gap, but with ~1 086
-   modeled contact frames (~14% of episode time). The geometry layer is correct;
-   the lateral policy and supervisor do not yet enforce separation. Until fixed,
-   the position result is not a valid pass result. Fix: make modeled contact a
-   hard infeasibility in the supervisor, not a post-hoc counter.
+8. **Contact is now a hard feasibility check for M.** The contact supervisor
+   (`decision/safety.py`) projects both cars forward and caps the committed
+   target speed so the ego cannot close into the rival before lateral separation
+   exists; deployment is scaled to the capped gain so energy is not wasted. M's
+   modeled contacts fell from 1 086 to **0** over the 3-seed batch. The
+   `m_no_belief` variant still contacts (170 frames) because the supervisor
+   projects the rival at its *observed* speed, so a defending rival that
+   accelerates can close faster than predicted. Next fix: project the rival at
+   the worst retained policy's speed, not the observed speed.
 
 ## Next slices, by owner
 

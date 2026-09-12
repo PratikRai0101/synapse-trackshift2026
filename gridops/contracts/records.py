@@ -87,6 +87,7 @@ class DecisionInput:
     ego_battery_temp_k: float
     gap_m: float
     laps_remaining: int
+    ego_lateral_m: float = 0.0
     opponent_speed_mps: float | None = None
     opponent_corner_limit_mps: float | None = None
     observations: list[ObservationFrame] = field(default_factory=list)
