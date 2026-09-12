@@ -8,7 +8,8 @@ from .lap_strategy import LapTimeSample
 
 
 def extract_lap_samples(frames: Iterable[Mapping[str, Any]], driver: str,
-                        mass_kg: float = 800.0) -> list[LapTimeSample]:
+                        mass_kg: float = 800.0,
+                        track_baseline_s: float = 90.0) -> list[LapTimeSample]:
     """Extract one sample per completed lap for one driver.
 
     FastF1 replay frames expose no fuel mass or battery channel. Fuel and
@@ -49,5 +50,6 @@ def extract_lap_samples(frames: Iterable[Mapping[str, Any]], driver: str,
             fuel_deployed=fuel_proxy,
             tyre_wear=tyre_wear,
             mass_kg=mass_kg,
+            track_baseline_s=track_baseline_s,
         ))
     return samples

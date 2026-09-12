@@ -20,6 +20,7 @@ class LapTimeSample:
     fuel_deployed: float = 0.0
     tyre_wear: float = 0.0
     mass_kg: float = 800.0
+    track_baseline_s: float = 90.0
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,7 @@ class LapTimeMap:
             round(sample.fuel_deployed / self.bin_width),
             round(sample.tyre_wear / max(self.bin_width, 1.0)),
             round(sample.mass_kg / 10.0),
+            round(sample.track_baseline_s / self.bin_width),
         )
 
     def fit(self, samples: Iterable[LapTimeSample]) -> "LapTimeMap":

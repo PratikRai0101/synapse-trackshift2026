@@ -31,6 +31,7 @@ def main() -> None:
                     fuel_deployed=float(row.get("fuel_deployed", 0.0)),
                     tyre_wear=float(row.get("tyre_wear", 0.0)),
                     mass_kg=float(row.get("mass_kg", 800.0)),
+                    track_baseline_s=float(row.get("track_baseline_s", 90.0)),
                 ))
     lap_map = LapTimeMap(args.bin_width).fit(samples)
     args.output.parent.mkdir(parents=True, exist_ok=True)

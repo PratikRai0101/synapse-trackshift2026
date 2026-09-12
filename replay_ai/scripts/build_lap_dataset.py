@@ -16,7 +16,8 @@ from scripts.build_dataset import event_split
 from src.intelligence.lap_dataset import extract_lap_samples
 
 
-def build(inputs, driver: str, output: Path, mass_kg: float = 800.0):
+def build(inputs, driver: str, output: Path, mass_kg: float = 800.0,
+         track_baseline_s: float = 90.0):
     output.mkdir(parents=True, exist_ok=True)
     handles = {split: (output / f"{split}.jsonl").open("w")
                for split in ("train", "validation", "test")}
@@ -29,7 +30,8 @@ def build(inputs, driver: str, output: Path, mass_kg: float = 800.0):
             frames = data.get("frames", data) if isinstance(data, dict) else data
             split = event_split(event)
             events[split].add(event)
-            for lap, sample in enumerate(extract_lap_samples(frames, driver, mass_kg), 1):
+            for lap, sample in enumerate(extract_lap_samples(
+                    frames, driver, mass_kg, track_baseline_s), 1):
                 record = {
                     "schema": "lap-time-sample.v1",
                     "event": event,
@@ -41,6 +43,7 @@ def build(inputs, driver: str, output: Path, mass_kg: float = 800.0):
                     "fuel_deployed": sample.fuel_deployed,
                     "tyre_wear": sample.tyre_wear,
                     "mass_kg": sample.mass_kg,
+                    "track_baseline_s": sample.track_baseline_s,
                 }
                 handles[split].write(json.dumps(record, separators=(",", ":")) + "\n")
                 counts[split] += 1
@@ -60,6 +63,7 @@ def main() -> None:
     parser.add_argument("--driver", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--mass-kg", type=float, default=800.0)
+    parser.add_argument("--track-baseline-s", type=float, default=90.0)
     args = parser.parse_args()
     inputs = []
     for item in args.input:
@@ -67,7 +71,8 @@ def main() -> None:
         if not separator or not event or not path:
             parser.error(f"invalid --input {item!r}; expected EVENT=PKL")
         inputs.append((event, path))
-    print(json.dumps(build(inputs, args.driver, args.output, args.mass_kg), indent=2))
+    print(json.dumps(build(inputs, args.driver, args.output, args.mass_kg,
+                            args.track_baseline_s), indent=2))
 
 
 if __name__ == "__main__":

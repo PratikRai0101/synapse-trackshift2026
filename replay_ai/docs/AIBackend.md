@@ -139,8 +139,10 @@ For Level 3 lap-time data, use the equivalent event-level pipeline:
 ```
 
 The lap map is fitted only on training-race laps and scored with held-out-race
-MAE. Battery and fuel fields remain explicit pedal-derived proxies until they
-are replaced with simulator-labelled energy states.
+MAE. It now includes a track baseline feature so different circuit lengths do
+not get conflated. Simulator-labelled training data is generated separately
+with explicit battery/fuel truth; public FastF1 samples still use explicit
+pedal-derived energy proxies.
 
 ## Measured behaviour
 
