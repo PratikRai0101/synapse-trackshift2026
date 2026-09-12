@@ -90,6 +90,10 @@ def _controller(name: str, runner: EpisodeRunner, seed: int) -> Controller:
             belief=RivalBelief.uniform(),
             horizon=3,
             iterations=400,
+            planner=ConditionalConvexPlanner(
+                runner.track, runner.vehicle, runner.battery, runner.terminal_value,
+                PlannerConfig(),
+            ),
             seed=seed,
         )
     raise ValueError(f"unknown controller: {name}")
@@ -198,7 +202,12 @@ def _benchmark(data: dict[str, Any], seed: int) -> list[dict[str, Any]]:
             )
         ),
         "ambiguity_aware": lambda runner, s: AmbiguityAwareController(
-            runner.terminal_value, RivalBelief.uniform(), horizon=3, iterations=300, seed=s
+            runner.terminal_value, RivalBelief.uniform(), horizon=3, iterations=300,
+            planner=ConditionalConvexPlanner(
+                runner.track, runner.vehicle, runner.battery, runner.terminal_value,
+                PlannerConfig(),
+            ),
+            seed=s,
         ),
     }
     rows: list[dict[str, Any]] = []

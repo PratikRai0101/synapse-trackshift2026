@@ -277,6 +277,7 @@ class AmbiguityAwareController:
         credible_epsilon: float = 0.05,
         ambiguity_threshold: float = 0.6,
         probe_cooldown_s: float = 4.0,
+        planner: ConditionalConvexPlanner | None = None,
         seed: int = 0,
     ) -> None:
         self.terminal_value = terminal_value
@@ -288,6 +289,7 @@ class AmbiguityAwareController:
         self.credible_epsilon = credible_epsilon
         self.ambiguity_threshold = ambiguity_threshold
         self.probe_cooldown_s = probe_cooldown_s
+        self.planner = planner
         self.rng = random.Random(seed)
         self.reserve_guard = ReserveGuard(terminal_value.reserve)
         self.no_progress = NoProgressGuard(repeat_threshold=4, cooldown_s=3.0)
@@ -346,12 +348,17 @@ class AmbiguityAwareController:
                 )
             self.pending_attack = best in (ActionFamily.ATTACK_NOW, ActionFamily.ATTACK_LATER)
             self.last_family = best
+            power, target, plan_problems = self._realize(best, decision_input)
+            if power is None:
+                return self._retain(
+                    decision_input, "PLAN_INVALID", start, result, extra=plan_problems
+                )
             return Decision(
                 family=best,
-                p_k_dc_w=_power_for_family(best, model.params),
-                target_speed_mps=_target_speed(best, decision_input.ego_speed_mps),
+                p_k_dc_w=power,
+                target_speed_mps=target,
                 status="RECOMMEND",
-                reason_codes=["GAIN_SURVIVES_SCENARIOS"],
+                reason_codes=["GAIN_SURVIVES_SCENARIOS"] + (["CONVEX_PROFILE"] if self.planner else []),
                 action_values={f.value: c for f, c in result.action_mean_cost.items()},
                 runtime_s=time.perf_counter() - start,
                 search_iterations=result.iterations,
@@ -373,14 +380,18 @@ class AmbiguityAwareController:
                 self.last_probe_s = decision_input.time_s
                 self.pending_attack = False
                 self.last_family = ActionFamily.PROBE
+                power, target, plan_problems = self._realize(ActionFamily.PROBE, decision_input)
+                if power is None:
+                    return self._retain(
+                        decision_input, "PLAN_INVALID", start, result, extra=plan_problems
+                    )
                 return Decision(
                     family=ActionFamily.PROBE,
-                    p_k_dc_w=_power_for_family(ActionFamily.PROBE, model.params),
-                    target_speed_mps=_target_speed(
-                        ActionFamily.PROBE, decision_input.ego_speed_mps
-                    ),
+                    p_k_dc_w=power,
+                    target_speed_mps=target,
                     status="RECOMMEND",
-                    reason_codes=["AMBIGUOUS_CAPABILITY"],
+                    reason_codes=["AMBIGUOUS_CAPABILITY"]
+                    + (["CONVEX_PROFILE"] if self.planner else []),
                     action_values={f.value: c for f, c in result.action_mean_cost.items()},
                     runtime_s=time.perf_counter() - start,
                     search_iterations=result.iterations,
@@ -389,12 +400,37 @@ class AmbiguityAwareController:
 
         return self._retain(decision_input, REASON_NO_IMPROVEMENT, start, result)
 
+    def _realize(
+        self, family: ActionFamily, decision_input: DecisionInput
+    ) -> tuple[float | None, float | None, tuple[str, ...]]:
+        """Realize a selected family as an actual convex deployment profile.
+
+        Returns ``(power, target_speed, problems)``; ``power is None`` means the
+        plan failed residual validation and the caller must fall back.
+        """
+        target = _target_speed(family, decision_input.ego_speed_mps)
+        if self.planner is None:
+            return _power_for_family(family, TacticalParams()), target, ()
+        plan = self.planner.plan(
+            progress_m=decision_input.ego_progress_m,
+            speed_mps=decision_input.ego_speed_mps,
+            usable_energy_j=decision_input.ego_usable_energy_j,
+            base_speed_mps=target,
+            mass_kg=self.planner.vehicle.mass_kg,
+        )
+        ok, problems = self.planner.validate_plan(plan)
+        if not ok:
+            return None, None, tuple(problems)
+        next_speed = float(plan.speed_mps[1]) if len(plan.speed_mps) > 1 else target
+        return plan.first_power_w(), next_speed, ()
+
     def _retain(
         self,
         decision_input: DecisionInput,
         reason: str,
         start: float,
         result: SearchResult | None = None,
+        extra: tuple[str, ...] = (),
     ) -> Decision:
         self.pending_attack = False
         self.last_family = ActionFamily.REFERENCE
@@ -402,8 +438,8 @@ class AmbiguityAwareController:
             family=ActionFamily.REFERENCE,
             p_k_dc_w=0.0,
             target_speed_mps=_target_speed(ActionFamily.REFERENCE, decision_input.ego_speed_mps),
-            status="RETAIN_REFERENCE",
-            reason_codes=[reason],
+            status="RETAIN_REFERENCE" if reason != "PLAN_INVALID" else "FALLBACK",
+            reason_codes=[reason, *extra],
             action_values=(
                 {f.value: c for f, c in result.action_mean_cost.items()} if result else {}
             ),
