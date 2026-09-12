@@ -229,9 +229,18 @@ class TacticalDecision:
 
 class MotorsportIntelligence:
     """End-to-end sector/lap facade consumed by replay and training scripts."""
-    def __init__(self) -> None:
+    def __init__(self, hmm_artifact: str | None = None) -> None:
         self.features = FeatureExtractor()
-        self.hmm = FortyStateHMM()
+        self.hmm_source = "default"
+        if hmm_artifact:
+            try:
+                self.hmm = FortyStateHMM.from_artifact(hmm_artifact)
+                self.hmm_source = hmm_artifact
+            except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+                # A missing/stale calibration must not prevent replay startup.
+                self.hmm = FortyStateHMM()
+        else:
+            self.hmm = FortyStateHMM()
         self.lifecycle = SeasonLifecycleManager()
         # Imported lazily to keep the HMM module usable as a small standalone
         # inference component without introducing a module cycle.

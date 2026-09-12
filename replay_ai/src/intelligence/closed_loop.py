@@ -55,13 +55,14 @@ class ClosedLoopSimulator:
     """Minimal action-responsive plant with inaccessible rival truth."""
 
     def __init__(self, rival_mode: HiddenRivalMode = HiddenRivalMode.MATCH,
-                 config: SimulationConfig | None = None) -> None:
+                 config: SimulationConfig | None = None,
+                 hmm_artifact: str | None = None) -> None:
         self.config = config or SimulationConfig()
         self.rival_mode = rival_mode  # simulation truth; never passed to model
         self.ego = CarState(280.0, 1.0, 70.0)
         self.rival = CarState(280.0, 1.0, 70.0)
         self.time_s = 0.0
-        self.model = MotorsportIntelligence()
+        self.model = MotorsportIntelligence(hmm_artifact=hmm_artifact)
 
     def _observation(self) -> RivalTelemetry:
         # Only the rival's public channels enter the model. Rival SOC/mode is
