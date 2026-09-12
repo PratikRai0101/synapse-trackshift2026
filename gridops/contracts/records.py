@@ -87,6 +87,7 @@ class DecisionInput:
     ego_battery_temp_k: float
     gap_m: float
     laps_remaining: int
+    opponent_speed_mps: float | None = None
     observations: list[ObservationFrame] = field(default_factory=list)
     versions: dict[str, str] = field(default_factory=dict)
 

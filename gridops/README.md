@@ -35,12 +35,13 @@ Use the venv at the repository root: `../.venv/bin/python`.
 | `decision/hmm_belief.py` | compact four-mode HMM, forward filtering, stationary comparator | done, tested |
 | `race_value/lap_map.py` | monotone terminal resource value, reserve band, finite-horizon value recursion | done, tested |
 | `evaluation/controllers.py` | reference, stationary (B_stat), posterior-mean (B_mean), ambiguity-aware (M) | wired |
+| `evaluation/calibration.py` | paired plant rollouts fitting gap-closure and rival-response models | done; identifiability open |
 | `evaluation/runner.py` | deterministic episode, public-only `DecisionInput` | done, tested |
 | `cli.py` | validate-config, run, benchmark | done |
 
 ## Test coverage
 
-108 tests. Highlights:
+112 passing, 2 xfailed. Highlights:
 
 - **Battery:** OCV/current-root identity, energy conservation derivative,
   current/voltage/SOC saturation, cooling, no post-hoc SOC clipping.
@@ -77,6 +78,16 @@ Use the venv at the repository root: `../.venv/bin/python`.
   more than rich.
 - **Risk criteria:** CVaR is more conservative than the mean and equals it at
   ``alpha=1``; minimax regret selects the action with the lowest worst regret.
+
+## Known open item: observation identifiability
+
+The two `xfail` tests in `tests/test_calibration.py` record the acceptance
+criterion for M committing on evidence. They fail for a real reason: the
+kinematic observation is dominated by track transients. A policy response is
+about 2 m/s over one second, while corner entry/exit moves the rival's speed by
+about 7 m/s. Gap closure is worse still, because it accumulates the ego's own
+advantage. The fix is to condition the observation model on track position or
+run an online model rollout against the ego's actual speed.
 
 ## Conventions frozen at G0
 

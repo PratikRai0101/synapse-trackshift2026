@@ -72,6 +72,20 @@ def rival_control(
     return config.deploy_power_w, config.base_target_speed_mps
 
 
+def rival_target_speed(
+    policy: RivalPolicy,
+    ego_family: ActionFamily,
+    gap_m: float,
+    since_ego_attack_s: float,
+    config: RivalPolicyConfig,
+) -> float:
+    """Declared target speed for a policy, independent of the plant.
+
+    Used as the default response model when no calibrated model is supplied.
+    """
+    return rival_control(policy, ego_family, gap_m, since_ego_attack_s, config)[1]
+
+
 #: Policy families used when a benchmark wants reactive opponents.
 REACTIVE_POLICIES: tuple[RivalPolicy, ...] = (
     RivalPolicy.MATCHING,
