@@ -33,6 +33,7 @@ from src.judge_mode import (
     JudgePresentController,
     JudgePresentPanel,
     JudgeWalkthroughController,
+    PolicyOutcome,
     JudgeWalkthroughPanel,
     available_present_cards,
     build_bookmarks,
@@ -167,6 +168,7 @@ class F1RaceReplayWindow(arcade.Window):
         )
         self._intelligence_models = {}
         self._intelligence_cache = {}
+        self._intelligence_computed_at = None
         self.race_engineer_hud = RaceEngineerHUD()
         self._energy_cache = {}
         self._focus_gap_ahead_s = None
@@ -1602,6 +1604,48 @@ class F1RaceReplayWindow(arcade.Window):
             return
         controller.select(index, self._present_card_count())
 
+    def _recorded_policy_outcome(self, start):
+        """Measure what actually happened in the replay over the branch horizon.
+
+        This is a recording measurement, not a simulation: it reads the focus
+        driver and rival at the matching future frame and reports the real gap
+        and estimated store, so the recommendation has a factual baseline.
+        """
+        horizon_s = 2.0  # mirrors run_counterfactual(steps=20) at dt=0.1
+        frames = getattr(self, "frames", None) or []
+        if not frames:
+            return None
+        index = max(0, min(int(start.frame_index), len(frames) - 1))
+        target_t = float(start.timestamp_s) + horizon_s
+        probe = index
+        while (probe < len(frames) - 1
+               and float(frames[probe].get("t", 0.0) or 0.0) < target_t):
+            probe += 1
+        drivers = frames[probe].get("drivers", {})
+        focus = drivers.get(start.driver)
+        rival = drivers.get(start.rival)
+        if focus is None or rival is None:
+            return None
+        try:
+            if int(rival.get("lap", -1) or -1) != int(focus.get("lap", -2) or -2):
+                return None
+        except (TypeError, ValueError):
+            return None
+        speed = float(focus.get("speed", 0.0) or 0.0)
+        if speed <= 1.0:
+            return None
+        distance = (float(rival.get("dist", 0.0) or 0.0)
+                    - float(focus.get("dist", 0.0) or 0.0))
+        final_gap = max(0.0, distance / (speed / 3.6))
+        try:
+            final_energy = float(self._get_energy_series(start.driver).soc[probe])
+        except Exception:
+            final_energy = start.own_energy
+        return PolicyOutcome(
+            "RECORDED", final_gap, final_gap - start.gap_s, final_energy,
+            "OBSERVED TELEMETRY",
+        )
+
     def _launch_counterfactual(self):
         """Evaluate actions in isolated simulators from the selected public state."""
         if self._counterfactual_running:
@@ -1616,8 +1660,10 @@ class F1RaceReplayWindow(arcade.Window):
         self._counterfactual_branch = None
         self._counterfactual_status = "COUNTERFACTUAL • RUNNING ISOLATED BRANCH"
         try:
+            recorded = self._recorded_policy_outcome(start)
             self._counterfactual_branch = run_counterfactual(
-                start, steps=20, seed=start.frame_index
+                start, steps=20, seed=start.frame_index,
+                recorded_outcome=recorded,
             )
             self._counterfactual_status = self._counterfactual_branch.status_text
         except Exception as exc:
@@ -1711,6 +1757,8 @@ class F1RaceReplayWindow(arcade.Window):
                     tuple(getattr(model.last_level2, "action_scores", ())),
                 )
                 self._intelligence_cache[intelligence_key] = cached
+                # Wall-clock stamp for the observation-freshness readout.
+                self._intelligence_computed_at = time.monotonic()
             (report.tactical, report.rival_hmm, report.lap_plan,
              runtime_metrics, action_scores) = cached
             report.runtime_metrics = dict(runtime_metrics)
@@ -2305,10 +2353,16 @@ class F1RaceReplayWindow(arcade.Window):
                 )
                 self._focus_report = report
                 if self.judge_mode_controller.enabled:
+                    observation_age_s = None
+                    if self._intelligence_computed_at is not None:
+                        observation_age_s = max(
+                            0.0, time.monotonic() - self._intelligence_computed_at
+                        )
                     self._judge_snapshot = JudgeModeModel.from_report(
                         report,
                         gap_s=self._focus_gap_ahead_s,
                         timestamp_s=float(frame.get("t", 0.0) or 0.0),
+                        observation_age_s=observation_age_s,
                     )
                     self.judge_panel.draw(
                         self,

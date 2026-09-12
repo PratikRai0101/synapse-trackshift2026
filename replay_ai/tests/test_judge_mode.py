@@ -11,6 +11,7 @@ from src.judge_mode import (
     JudgePresentController,
     JudgePresentPanel,
     JudgeWalkthroughController,
+    PolicyOutcome,
     JudgeWalkthroughPanel,
     available_present_cards,
     build_bookmarks,
@@ -18,6 +19,7 @@ from src.judge_mode import (
     describe_capability_belief,
     run_counterfactual,
     scenario_label_from_session,
+    selected_policy_outcome,
 )
 
 
@@ -162,6 +164,27 @@ def test_counterfactual_branch_is_separate_and_does_not_mutate_start():
     assert start.own_energy == 62.0
 
 
+def test_counterfactual_compares_recorded_reference_and_recommendation():
+    start = BranchStart(
+        frame_index=42, timestamp_s=18.0, driver="EGO", rival="RIV",
+        own_speed_kmh=300.0, rival_speed_kmh=298.0, gap_s=0.7,
+        own_energy=62.0, battery_temperature=75.0, battery_soh=0.98,
+    )
+    recorded = PolicyOutcome("RECORDED", 0.55, -0.15, 60.0,
+                             "OBSERVED TELEMETRY")
+    branch = run_counterfactual(start, steps=3, seed=2,
+                                recorded_outcome=recorded)
+
+    assert branch.recorded is recorded
+    assert branch.reference is not None
+    assert branch.reference.label == "REFERENCE POLICY"
+    assert branch.reference.gap_change_s == pytest.approx(
+        branch.reference.final_gap_s - start.gap_s
+    )
+    selected = selected_policy_outcome(branch, "BURN")
+    assert selected is not None and selected.action == "BURN"
+
+
 def test_judge_panel_is_a_compact_non_overlapping_lower_third():
     panel = JudgeModePanel()
     bounds = panel.layout_bounds(
@@ -201,6 +224,8 @@ def test_judge_panel_draws_counterfactual_results(monkeypatch):
                              right_ui_margin=260, driver_colors={}, total_laps=10)
     branch = SimpleNamespace(
         status_text="COUNTERFACTUAL • 3 PLAUSIBLE MODES • 3 ACTIONS",
+        recorded=PolicyOutcome("RECORDED", 0.55, -0.15, 60.0, "OBSERVED"),
+        reference=PolicyOutcome("REFERENCE POLICY", 0.9, 0.2, 63.0, "DEFAULT"),
         outcomes=(
             SimpleNamespace(action="BURN", final_gap_s=0.4, final_energy=55.0,
                             energy_deployed=4.0, plausible_modes=3),
@@ -209,8 +234,25 @@ def test_judge_panel_draws_counterfactual_results(monkeypatch):
     JudgeModePanel().draw(window, JudgeModeModel.from_report(_report()),
                           branch=branch)
 
-    assert any("COUNTERFACTUAL BRANCH" in text for kind, text in calls if kind == "text")
-    assert any("3 plausible responses" in text for kind, text in calls if kind == "text")
+    texts = [text for kind, text in calls if kind == "text"]
+    assert any("COUNTERFACTUAL BRANCH" in text for text in texts)
+    assert any("3 plausible responses" in text for text in texts)
+    # Recorded vs reference-policy vs the deployed recommendation.
+    assert {"RECORDED", "REFERENCE POLICY", "AI POLICY"}.issubset(set(texts))
+
+
+def test_snapshot_reports_observation_freshness_and_replanned_layers():
+    report = _report()
+    report.runtime_metrics = dict(report.runtime_metrics)
+    report.runtime_metrics["replanned_layers"] = ("HMM", "L2", "SOCP", "MPC")
+    snapshot = JudgeModeModel.from_report(
+        report, timestamp_s=294.5, observation_age_s=0.4,
+    )
+
+    assert snapshot.timestamp_s == 294.5
+    assert snapshot.observation_age_s == 0.4
+    assert snapshot.replanned_layers == ("HMM", "L2", "SOCP", "MPC")
+    assert "L3" not in snapshot.replanned_layers
 
 
 def test_judge_panel_draws_against_a_window_contract(monkeypatch):
@@ -437,7 +479,7 @@ def test_walkthrough_window_flow_keeps_bookmark_and_branch_separate(monkeypatch)
 
     branch = SimpleNamespace(status_text="COUNTERFACTUAL • 3 PLAUSIBLE MODES • 3 ACTIONS")
     monkeypatch.setattr("src.interfaces.race_replay.run_counterfactual",
-                        lambda start, steps, seed: branch)
+                        lambda start, steps, seed, **kwargs: branch)
     window._launch_counterfactual()
     assert window._counterfactual_branch is branch
     assert window.frames[0]["t"] == 0.0
@@ -449,6 +491,35 @@ def test_walkthrough_window_flow_keeps_bookmark_and_branch_separate(monkeypatch)
     assert window._counterfactual_branch is None
     assert window.frame_index == window.judge_bookmarks[5].frame_index
     assert window.frames == original_frames
+
+
+def test_recorded_policy_outcome_measures_the_replay_not_a_simulation():
+    window = object.__new__(F1RaceReplayWindow)
+    window._energy_cache = {}
+    window._model_config = None
+    window.frames = []
+    for index in range(60):
+        window.frames.append({
+            "t": index * 0.04,
+            "drivers": {
+                "EGO": {"position": 2, "lap": 5,
+                        "dist": 100.0 + index * 3.0, "speed": 250.0},
+                "RIV": {"position": 1, "lap": 5,
+                        "dist": 130.0 + index * 3.0, "speed": 250.0},
+            },
+        })
+    start = BranchStart(
+        frame_index=0, timestamp_s=0.0, driver="EGO", rival="RIV",
+        own_speed_kmh=250.0, rival_speed_kmh=250.0, gap_s=0.432,
+        own_energy=70.0,
+    )
+
+    recorded = window._recorded_policy_outcome(start)
+
+    assert recorded is not None
+    assert recorded.label == "RECORDED"
+    # The synthetic replay holds a constant 30 m gap at 250 km/h.
+    assert recorded.final_gap_s == pytest.approx(30.0 / (250.0 / 3.6), rel=1e-6)
 
 
 def test_present_toggle_pauses_and_pages_the_deck():

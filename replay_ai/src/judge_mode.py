@@ -9,7 +9,9 @@ window so it can be tested without an OpenGL context.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 import textwrap
+import time
 from typing import Any, Mapping, Optional, Sequence
 
 import arcade
@@ -29,6 +31,7 @@ from src.ui_theme import (
     draw_chip,
     draw_meter,
     draw_panel,
+    lerp_color,
 )
 
 RGB = tuple[int, int, int]
@@ -151,6 +154,11 @@ class JudgeModeSnapshot:
     layer_activity: tuple[str, ...] = ()
     gap_s: Optional[float] = None
     timestamp_s: Optional[float] = None
+    # Wall-clock seconds since the belief was last recomputed. Near zero while
+    # the replay advances; grows while paused, which flags a held observation.
+    observation_age_s: Optional[float] = None
+    # Layers that recomputed for this observation, most recent first.
+    replanned_layers: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -219,7 +227,8 @@ class JudgeModeModel:
 
     @classmethod
     def from_report(cls, report: Any, gap_s: Optional[float] = None,
-                    timestamp_s: Optional[float] = None) -> JudgeModeSnapshot:
+                    timestamp_s: Optional[float] = None,
+                    observation_age_s: Optional[float] = None) -> JudgeModeSnapshot:
         tactical = getattr(report, "tactical", None)
         hmm = getattr(report, "rival_hmm", None)
         metrics = getattr(report, "runtime_metrics", {}) or {}
@@ -330,8 +339,10 @@ class JudgeModeModel:
                 "SOCP performance envelope",
                 "zone MPC execution",
             ),
+            replanned_layers=tuple(metrics.get("replanned_layers", ())),
             gap_s=gap_s,
             timestamp_s=timestamp_s,
+            observation_age_s=observation_age_s,
         )
 
 
@@ -750,6 +761,19 @@ class JudgeModePanel:
             context += f" • SCENARIO {bookmark.hotkey}: {bookmark.title}"
         self._t("context", context, left + width - pad, top - 34, 9,
                  TEXT, bold=True, anchor_x="right")
+        # Explicit observation freshness: which replay sample produced the
+        # belief, and how long ago it was computed (grows while paused).
+        freshness_parts = []
+        if snapshot.timestamp_s is not None:
+            seconds = float(snapshot.timestamp_s)
+            freshness_parts.append(f"OBS {int(seconds) // 60:02d}:{seconds % 60:04.1f}")
+        age = snapshot.observation_age_s
+        if age is not None:
+            freshness_parts.append(f"AGE {age:.1f}s")
+        if freshness_parts:
+            fresh_color = GREEN if age is None or age < 1.0 else AMBER
+            self._t("freshness", "  •  ".join(freshness_parts),
+                     left + pad, top - 34, 7, fresh_color, bold=True)
 
         content_top = top - 50
         command_x = left + pad + 4
@@ -816,12 +840,22 @@ class JudgeModePanel:
                      content_top - 23 - index * 16, 7, TEXT)
         self._t("why_footer", f"→ {snapshot.explanation[:40]}", why_x,
                  content_top - 74, 7, snapshot.command_color)
-        layers = "  →  ".join(
-            ("HMM40", "POMCP" if snapshot.search_particles else "SEARCH",
-             "SOCP", "MPC")
-        )
-        self._t("layers", f"LAYER ACTIVITY  {layers}", why_x,
-                 content_top - 92, 7, ELECTRIC, bold=True)
+        # Layer activity strip: L3 only lights up when the lap boundary moves,
+        # the rest run every observation. Active layers pulse so a judge can
+        # see the hierarchy is running rather than read a static label.
+        active_layers = set(snapshot.replanned_layers) or {
+            "L3", "HMM", "L2", "SOCP", "MPC"
+        }
+        pulse = 0.55 + 0.45 * abs(math.sin(time.monotonic() * 3.0))
+        self._t("layers_label", "LAYERS", why_x, content_top - 92, 7,
+                 MUTED, bold=True)
+        layer_x = why_x + 46
+        for index, key in enumerate(("L3", "HMM", "L2", "SOCP", "MPC")):
+            is_active = key in active_layers
+            color = lerp_color(EDGE, ELECTRIC, pulse) if is_active else EDGE
+            self._t(f"layer_{index}", key, layer_x, content_top - 92, 7,
+                     color, bold=is_active)
+            layer_x += len(key) * 4.4 + 12
 
         # --- alternatives, pinned above the footer so it can never collide ---
         options_title_y = bottom + 70
@@ -838,11 +872,22 @@ class JudgeModePanel:
             self._t("branch_modes", f"{modes} plausible responses",
                      command_x + cw, options_title_y, 7, ELECTRIC,
                      anchor_x="right")
-            for index, outcome in enumerate(branch.outcomes[:3]):
+            # Recorded vs reference-policy vs the deployed recommendation: the
+            # three-way comparison that shows whether the call adds value.
+            comparison: list[tuple[str, Any, RGB, bool]] = []
+            if getattr(branch, "recorded", None) is not None:
+                comparison.append((branch.recorded.label, branch.recorded, MUTED, False))
+            if getattr(branch, "reference", None) is not None:
+                comparison.append((branch.reference.label, branch.reference,
+                                   ELECTRIC, False))
+            deployed = selected_policy_outcome(branch, snapshot.command)
+            if deployed is not None:
+                comparison.append(("AI POLICY", deployed,
+                                   snapshot.command_color, True))
+            for index, (label, outcome, color, bold) in enumerate(comparison[:3]):
                 y = option_rows[index]
-                color = snapshot.command_color if outcome.action == snapshot.command else MUTED
-                self._t(f"branch_name_{index}", outcome.action, command_x, y, 8,
-                         color, bold=outcome.action == snapshot.command)
+                self._t(f"branch_name_{index}", label, command_x, y, 8,
+                         color, bold=bold)
                 self._t(
                     f"branch_gap_{index}",
                     f"Δ {getattr(outcome, 'gap_change_s', 0.0):+.2f}s",
@@ -1584,45 +1629,56 @@ class JudgePresentPanel:
                  "POSITIVE ENERGY COST SPENDS STORE; NEGATIVE RECOVERS IT",
                  left + pad, bottom + 66, 10, ELECTRIC, bold=True)
 
-    def _draw_counterfactual(self, branch: Any, left: float, bottom: float,
-                             width: float, top: float, pad: float) -> None:
+    def _draw_counterfactual(self, branch: Any, snapshot: JudgeModeSnapshot,
+                             left: float, bottom: float, width: float,
+                             top: float, pad: float) -> None:
         self._section("counterfactual", PRESENT_CARD_TITLES["counterfactual"],
                       left, top, pad, color=AMBER)
         self._t("present_cf_source",
                  f"FORKED FROM RECORDED FRAME {branch.source_frame_index}  •  "
-                 "RESULTS AVERAGED, REPLAY UNCHANGED",
+                 "SIMULATION NEVER REWRITES THE REPLAY",
                  left + pad, top - 40, 10, MUTED, bold=True)
         content_w = width - 2 * pad
         columns = (
-            (0.00, "ACTION", "left"),
-            (0.30, "Δ GAP", "left"),
-            (0.48, "FINAL GAP", "left"),
-            (0.66, "STORE", "left"),
-            (1.00, "RESPONSES", "right"),
+            (0.00, "OUTCOME", "left"),
+            (0.30, "FINAL GAP", "left"),
+            (0.48, "Δ GAP", "left"),
+            (0.64, "STORE", "left"),
+            (1.00, "BASIS", "right"),
         )
         for offset, label, anchor in columns:
             self._t(f"present_cf_head_{label}", label,
                      left + pad + content_w * offset, top - 72, 10, MUTED,
                      bold=True, anchor_x=anchor)
-        for index, outcome in enumerate(branch.outcomes[:3]):
-            y = top - 108 - index * 40
-            color = AMBER if index == 0 else MUTED
-            self._t(f"present_cf_name_{index}", outcome.action, left + pad, y,
-                     14, color, bold=index == 0)
+        comparison: list[tuple[str, Any, RGB, str, bool]] = []
+        if getattr(branch, "recorded", None) is not None:
+            comparison.append((branch.recorded.label, branch.recorded, MUTED,
+                               "OBSERVED TELEMETRY", False))
+        if getattr(branch, "reference", None) is not None:
+            comparison.append((branch.reference.label, branch.reference, ELECTRIC,
+                               "MODEL DEFAULT", False))
+        deployed = selected_policy_outcome(branch, getattr(snapshot, "command", None))
+        if deployed is not None:
+            color = getattr(snapshot, "command_color", AMBER)
+            comparison.append(("AI POLICY", deployed, color,
+                               f"{deployed.action} FORCED", True))
+        for index, (label, outcome, color, basis, bold) in enumerate(comparison[:3]):
+            y = top - 108 - index * 44
+            self._t(f"present_cf_name_{index}", label, left + pad, y, 14,
+                     color, bold=bold)
+            self._t(f"present_cf_final_{index}", f"{outcome.final_gap_s:.2f} s",
+                     left + pad + content_w * 0.30, y, 13, TEXT)
             self._t(f"present_cf_delta_{index}",
                      f"{getattr(outcome, 'gap_change_s', 0.0):+.2f} s",
-                     left + pad + content_w * 0.30, y, 13, TEXT)
-            self._t(f"present_cf_final_{index}", f"{outcome.final_gap_s:.2f} s",
                      left + pad + content_w * 0.48, y, 13, TEXT)
             self._t(f"present_cf_store_{index}",
                      f"{outcome.final_energy:.0f} EU",
-                     left + pad + content_w * 0.66, y, 13, MUTED)
-            self._t(f"present_cf_modes_{index}",
-                     f"{outcome.plausible_modes}",
-                     left + pad + content_w, y, 13, color,
+                     left + pad + content_w * 0.64, y, 13, MUTED)
+            self._t(f"present_cf_modes_{index}", basis,
+                     left + pad + content_w, y, 11, color,
                      anchor_x="right")
         self._t("present_cf_note",
-                 "HIDDEN RIVAL MODE NEVER ENTERS THE DECISION",
+                 "REFERENCE = SIMULATOR DEFAULT   •   AI POLICY = RECOMMENDATION FORCED",
                  left + pad, bottom + 66, 10, AMBER, bold=True)
 
     def _draw_architecture(self, snapshot: JudgeModeSnapshot, left: float,
@@ -1646,12 +1702,25 @@ class JudgePresentPanel:
             ("ZONE MPC • EXECUTION", target, snapshot.command_color),
         )
         box_w = min(720.0, width - 2 * pad)
-        row_h = 46.0
+        # Fit five stage boxes between the card title and the footer note.
+        available = max(120.0, top - (bottom + 96.0))
+        gap = 12.0
+        row_h = max(28.0, min(46.0, available / 5.0 - gap))
+        active_layers = set(snapshot.replanned_layers) or {
+            "L3", "HMM", "L2", "SOCP", "MPC"
+        }
+        stage_keys = ("", "HMM", "L2", "SOCP", "MPC")
+        pulse = 0.55 + 0.45 * abs(math.sin(time.monotonic() * 3.0))
         for index, (name, detail, color) in enumerate(stages):
-            y = top - 46 - index * (row_h + 16)
+            y = top - row_h / 2.0 - 6.0 - index * (row_h + gap)
+            # Only the layers that recomputed for this observation pulse; L3
+            # stays dim until a lap boundary forces a new plan.
+            is_active = index == 0 or stage_keys[index] in active_layers
+            accent = (lerp_color(EDGE_SOFT, color, pulse) if is_active
+                      else EDGE_SOFT)
             draw_panel(left + pad + box_w / 2.0, y, box_w, row_h,
                        fill=(28, 28, 35), fill_alpha=230, edge=EDGE_SOFT,
-                       edge_width=1, accent=color, accent_width=5)
+                       edge_width=1, accent=accent, accent_width=5)
             self._t(f"present_arch_name_{index}", name, left + pad + 18, y + 8,
                      13, TEXT, bold=True)
             self._t(f"present_arch_detail_{index}", detail, left + pad + 18, y - 9,
@@ -1706,16 +1775,22 @@ class JudgePresentPanel:
         self._t("present_driver",
                  f"{driver}   P{position}   •   LAP {lap}/{total_laps}",
                  left + pad, top - 28, 13, MUTED, bold=True)
-        self._t("present_command", command, left + width * 0.48, top - 32, 24,
+        self._t("present_command", command, left + width * 0.48, top - 30, 24,
                  command_color, bold=True, anchor_x="center")
         self._t("present_page", f"{index + 1} / {len(cards)}", right - pad,
                  top - 28, 13, MUTED, bold=True, anchor_x="right")
-        self._t("present_confidence", f"{confidence * 100:.0f}% confidence",
-                 right - pad, top - 52, 11, TEXT, bold=True, anchor_x="right")
+        confidence_text = f"{confidence * 100:.0f}% confidence"
+        if snapshot is not None and snapshot.timestamp_s is not None:
+            seconds = float(snapshot.timestamp_s)
+            confidence_text += f"   •   OBS {int(seconds) // 60:02d}:{seconds % 60:04.1f}"
+        if snapshot is not None and snapshot.observation_age_s is not None:
+            confidence_text += f"   •   AGE {snapshot.observation_age_s:.1f}s"
+        self._t("present_confidence", confidence_text,
+                 right - pad, top - 58, 11, TEXT, bold=True, anchor_x="right")
         self._t("present_mode",
                  "COUNTERFACTUAL SIMULATION" if branch is not None
                  and getattr(branch, "outcomes", ()) else "REAL TELEMETRY REPLAY",
-                 left + pad, top - 52, 11, accent, bold=True)
+                 left + pad, top - 58, 11, accent, bold=True)
         arcade.draw_rect_filled(
             arcade.XYWH(left + width / 2.0, top - 70, width - 2 * pad, 1),
             EDGE_SOFT,
@@ -1748,7 +1823,8 @@ class JudgePresentPanel:
         elif card == "alternatives":
             self._draw_alternatives(snapshot, left, bottom, width, body_top, pad)
         elif card == "counterfactual" and branch is not None:
-            self._draw_counterfactual(branch, left, bottom, width, body_top, pad)
+            self._draw_counterfactual(branch, snapshot, left, bottom, width,
+                                      body_top, pad)
         else:
             self._draw_architecture(snapshot, left, bottom, width, body_top, pad)
 
@@ -1804,6 +1880,17 @@ class CounterfactualOutcome:
 
 
 @dataclass(frozen=True)
+class PolicyOutcome:
+    """One averaged result for a policy the judge can read directly."""
+
+    label: str
+    final_gap_s: float
+    gap_change_s: float
+    final_energy: float
+    note: str = ""
+
+
+@dataclass(frozen=True)
 class CounterfactualReport:
     """Separate simulation result; never a mutation of recorded replay data."""
 
@@ -1813,6 +1900,10 @@ class CounterfactualReport:
     driver: str
     rival: str
     outcomes: tuple[CounterfactualOutcome, ...]
+    # The direct comparison the pitch needs: what actually happened, what the
+    # simulator's own policy does, and what the forced recommendation does.
+    reference: Optional[PolicyOutcome] = None
+    recorded: Optional[PolicyOutcome] = None
 
     @property
     def status_text(self) -> str:
@@ -1823,53 +1914,102 @@ class CounterfactualReport:
         )
 
 
+def selected_policy_outcome(
+    branch: Any, command: Optional[str],
+) -> Optional[CounterfactualOutcome]:
+    """Return the branch outcome matching the deployed recommendation."""
+    outcomes = getattr(branch, "outcomes", ()) if branch is not None else ()
+    if not outcomes:
+        return None
+    for outcome in outcomes:
+        if getattr(outcome, "action", None) == command:
+            return outcome
+    return outcomes[0]
+
+
+def _simulate_trace_set(
+    start: BranchStart, steps: int, seed: int,
+    forced_action: Optional[str] = None,
+) -> list:
+    """Run one isolated simulator per plausible hidden rival mode.
+
+    ``forced_action`` pins the decision; ``None`` runs the simulator's own
+    policy, which is the reference the recommendation is measured against.
+    """
+    from src.intelligence.closed_loop import ClosedLoopSimulator, HiddenRivalMode
+
+    traces = []
+    for offset, mode in enumerate(HiddenRivalMode):
+        simulator = ClosedLoopSimulator(
+            mode,
+            seed=seed + offset,
+            use_mpc=True,
+            controller_variant="no_search",
+            initial_speed_kmh=start.own_speed_kmh,
+            initial_rival_speed_kmh=start.rival_speed_kmh,
+            initial_gap_s=start.gap_s,
+            initial_energy=start.own_energy,
+            initial_temperature=start.battery_temperature,
+            initial_battery_soh=start.battery_soh,
+            initial_lap=start.lap,
+        )
+        if forced_action is None:
+            simulator.run(steps)
+        else:
+            simulator.run_forced(forced_action, steps)
+        traces.append(simulator)
+    return traces
+
+
+def _mean_policy_outcome(label: str, traces: Sequence, start: BranchStart,
+                         note: str = "") -> PolicyOutcome:
+    divisor = float(len(traces)) or 1.0
+    final_gap = sum(simulator.ego.gap_s for simulator in traces) / divisor
+    return PolicyOutcome(
+        label=label,
+        final_gap_s=final_gap,
+        gap_change_s=final_gap - start.gap_s,
+        final_energy=sum(simulator.ego.energy for simulator in traces) / divisor,
+        note=note,
+    )
+
+
 def run_counterfactual(
     start: BranchStart,
     actions: Sequence[str] = ("BURN", "HARVEST", "PROACTIVE TRAP"),
     steps: int = 20,
     seed: int = 0,
+    recorded_outcome: Optional[PolicyOutcome] = None,
 ) -> CounterfactualReport:
     """Run isolated branches from public state under plausible rival modes.
 
     The simulator's hidden mode is used only by the evaluator inside each
     branch. Results shown to the judge are averaged across the three plausible
-    modes, so the deployed decision never receives the hidden label.
+    modes, so the deployed decision never receives the hidden label. The
+    reference trace runs the simulator's own policy with no override, so the
+    recommended branch can be compared against it and against the recording.
     """
-    from src.intelligence.closed_loop import ClosedLoopSimulator, HiddenRivalMode
-
     outcomes: list[CounterfactualOutcome] = []
     for action in actions:
         if action not in ("BURN", "HARVEST", "PROACTIVE TRAP"):
             raise ValueError(f"unknown counterfactual action: {action}")
-        traces = []
-        for offset, mode in enumerate(HiddenRivalMode):
-            simulator = ClosedLoopSimulator(
-                mode,
-                seed=seed + offset,
-                use_mpc=True,
-                controller_variant="no_search",
-                initial_speed_kmh=start.own_speed_kmh,
-                initial_rival_speed_kmh=start.rival_speed_kmh,
-                initial_gap_s=start.gap_s,
-                initial_energy=start.own_energy,
-                initial_temperature=start.battery_temperature,
-                initial_battery_soh=start.battery_soh,
-                initial_lap=start.lap,
-            )
-            simulator.run_forced(action, steps)
-            traces.append(simulator)
+        traces = _simulate_trace_set(start, steps, seed, forced_action=action)
         divisor = float(len(traces)) or 1.0
+        final_gap = sum(simulator.ego.gap_s for simulator in traces) / divisor
         outcomes.append(CounterfactualOutcome(
             action=action,
-            final_gap_s=sum(simulator.ego.gap_s for simulator in traces) / divisor,
-            gap_change_s=(sum(simulator.ego.gap_s for simulator in traces) / divisor
-                          - start.gap_s),
+            final_gap_s=final_gap,
+            gap_change_s=final_gap - start.gap_s,
             final_energy=sum(simulator.ego.energy for simulator in traces) / divisor,
             final_speed_kmh=sum(simulator.ego.speed_kmh for simulator in traces) / divisor,
             energy_deployed=sum(simulator.cumulative_deployed for simulator in traces) / divisor,
             energy_recovered=sum(simulator.cumulative_recovered for simulator in traces) / divisor,
             plausible_modes=len(traces),
         ))
+    reference = _mean_policy_outcome(
+        "REFERENCE POLICY", _simulate_trace_set(start, steps, seed),
+        start, "MODEL DEFAULT",
+    )
     return CounterfactualReport(
         run_mode="counterfactual",
         source_frame_index=start.frame_index,
@@ -1877,4 +2017,6 @@ def run_counterfactual(
         driver=start.driver,
         rival=start.rival,
         outcomes=tuple(outcomes),
+        reference=reference,
+        recorded=recorded_outcome,
     )
