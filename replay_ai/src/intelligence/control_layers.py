@@ -126,11 +126,8 @@ class BoundedScenarioPlanner:
         track = tuple(TrackSample(index * 25.0,
                                    max(0.0, curvature + 0.0002 * index))
                       for index in range(5))
-        spatial = self.spatial.plan(
-            track,
-            max(0.0, own_speed_kmh),
-            speed_gain_kmh=selected.expected_gap_change_s * 20.0,
-        )
+        tactical_speed = max(0.0, own_speed_kmh + selected.expected_gap_change_s * 20.0)
+        spatial = self.spatial.plan(track, tactical_speed, speed_gain_kmh=0.0)
         reference = spatial.speeds_kmh
         lambda_kin = spatial.kinetic_costates
         lambda_b = max(0.01, (100.0 - energy) / 100.0)

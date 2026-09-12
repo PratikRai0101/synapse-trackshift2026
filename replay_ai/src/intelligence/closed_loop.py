@@ -77,6 +77,7 @@ class ClosedLoopSimulator:
                                              lap_map_artifact=lap_map_artifact)
         self.execution = FastExecutionController()
         self.last_mpc_result = None
+        self.rival_defending = False
 
     def _observation(self) -> RivalTelemetry:
         # Only the rival's public channels enter the model. Rival SOC/mode is
@@ -129,22 +130,27 @@ class ClosedLoopSimulator:
             power_fraction = 0.0
         curvature = 0.0012 + 0.0008 * math.sin(self.plant.state.distance_m / 180.0)
         previous_energy = self.plant.state.energy
-        plant_step = self.plant.step(power_fraction, cfg.dt_s, curvature,
-                                     regen_fraction=regen_fraction)
+        plant_step = self.plant.step(
+            power_fraction, cfg.dt_s, curvature,
+            regen_fraction=regen_fraction,
+            slipstream_gap_s=self.ego.gap_s,
+        )
         self.ego.speed_kmh = plant_step.speed_kmh
         self.ego.energy = plant_step.energy
         self.battery_temperature = plant_step.battery_temperature
         throughput = abs(plant_step.energy - previous_energy)
         self.battery_soh = max(0.60, self.battery_soh - throughput * 0.00005)
 
+        self.rival_defending = self.ego.gap_s < 1.0
+        defense_bonus = 4.0 if self.rival_defending else 0.0
         if self.rival_mode is HiddenRivalMode.CONSERVE:
-            rival_accel = cfg.rival_accel_kmh_s + 8.0
+            rival_accel = cfg.rival_accel_kmh_s + 8.0 + defense_bonus
         elif self.rival_mode is HiddenRivalMode.DEPLETE:
             # The rival loses pace despite 100% throttle, creating a genuine
             # attack opportunity visible through public speed/gap response.
-            rival_accel = cfg.rival_accel_kmh_s - 12.0
+            rival_accel = cfg.rival_accel_kmh_s - 30.0 + defense_bonus
         else:
-            rival_accel = cfg.rival_accel_kmh_s
+            rival_accel = cfg.rival_accel_kmh_s + defense_bonus
         self.rival.speed_kmh = max(0.0, self.rival.speed_kmh +
                                    (rival_accel - cfg.drag_kmh_s) * cfg.dt_s)
         # Positive gap means the rival remains ahead. Approximate time-gap
@@ -164,6 +170,10 @@ class ClosedLoopSimulator:
                                         self.ego.gap_s, public.active_aero),
             decision, self.ego.speed_kmh, self.ego.gap_s, self.ego.energy,
         )
+
+    def pit_stop(self) -> None:
+        """Apply a pit event to the ego plant; future frames reflect new tyres/fuel."""
+        self.plant.pit_stop()
 
     def run(self, steps: int) -> tuple[SimulationStep, ...]:
         return tuple(self.step() for _ in range(max(0, int(steps))))
