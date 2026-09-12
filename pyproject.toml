@@ -1,0 +1,18 @@
+[project]
+name = "gridops"
+version = "0.1.0"
+description = "GRID//OPS energy and overtake decision support engine"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+]
+
+[project.optional-dependencies]
+planner = ["cvxpy>=1.4", "clarabel>=0.6"]
+dev = ["pytest>=7.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["gridops/tests"]
+pythonpath = ["."]
+addopts = "-q"
