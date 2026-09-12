@@ -29,6 +29,21 @@ def test_feature_baseline_uses_prior_laps_in_the_same_sector():
     assert other_sector.dv_baseline == 0.0
 
 
+def test_feature_extractor_measures_super_clip_duration():
+    extractor = FeatureExtractor()
+    # Seal lap one so sector 0 has a fast baseline in history.
+    extractor.update(RivalTelemetry(320, 100, 0, 0.8, sector=0, lap=1, time_s=5.0))
+    extractor.update(RivalTelemetry(320, 100, 0, 0.8, sector=0, lap=2, time_s=6.0))
+    # Full throttle but far off the baseline: the clip now accumulates time.
+    first = extractor.update(RivalTelemetry(290, 100, 0, 0.8, sector=0, lap=2, time_s=6.5))
+    second = extractor.update(RivalTelemetry(290, 100, 0, 0.8, sector=0, lap=2, time_s=7.0))
+    assert first.clip_seconds == 0.5
+    assert second.clip_seconds == 1.0
+    # Back on the baseline pace, the duration resets.
+    cleared = extractor.update(RivalTelemetry(320, 100, 0, 0.8, sector=0, lap=2, time_s=7.5))
+    assert cleared.clip_seconds == 0.0
+
+
 def test_observation_updates_only_from_current_public_sample():
     model = MotorsportIntelligence()
     first = model.observe(RivalTelemetry(300, 100, 0, 1.0), own_speed_kmh=295)

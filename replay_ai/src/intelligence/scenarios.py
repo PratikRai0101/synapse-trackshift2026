@@ -198,6 +198,7 @@ def scan_recorded_driver(frames: Sequence[Mapping], driver: str,
             sector=_as_int(rival.get("sector")) or 0,
             lap=_as_int(rival.get("lap")) or 0,
             tyre_life=float(rival.get("tyre_life", 0.0) or 0.0),
+            time_s=float(frame.get("t", 0.0) or 0.0),
         ))
         probabilities = result.ers_probabilities
         observations.append(ScenarioObservation(

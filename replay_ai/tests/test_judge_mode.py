@@ -83,6 +83,17 @@ def test_judge_snapshot_explains_action_without_claiming_rival_soc():
     assert "SOCP performance envelope" in snapshot.layer_activity
 
 
+def test_evidence_reports_measured_clip_duration_not_a_fraction():
+    report = _report()
+    report.rival_hmm.features = SimpleNamespace(
+        dv_baseline=-14.0, dgap=0.18, throttle_clip=0.75, clip_seconds=1.8,
+        speed_variance=5.0, aero=1.0, tyre_life=11.0,
+    )
+    snapshot = JudgeModeModel.from_report(report)
+
+    assert any("sustained 1.8s" in evidence for evidence in snapshot.evidence)
+
+
 def test_judge_snapshot_uses_explicit_uncertainty_for_trap():
     snapshot = JudgeModeModel.from_report(_report("PROACTIVE TRAP"))
 
@@ -230,6 +241,14 @@ def test_judge_panel_draws_against_a_window_contract(monkeypatch):
     assert any(kind == "text" and "Lharvest" in text for kind, text in calls)
     assert any(kind == "text" and "Lderate" in text for kind, text in calls)
     assert any(kind == "text" and "POMCP" in text for kind, text in calls)
+    # P3/P4: causal evidence and the alternatives table carry explicit labels.
+    assert any(kind == "text" and "WHY THE MODEL CHANGED" in text
+               for kind, text in calls)
+    assert any(kind == "text" and text.startswith("✓") for kind, text in calls)
+    assert {label for label in ("IMM. GAIN", "ENERGY", "LATER", "DECISION")
+            if any(kind == "text" and label == text for kind, text in calls)} == {
+        "IMM. GAIN", "ENERGY", "LATER", "DECISION"
+    }
     assert any(kind == "draw_rect_filled" for kind, _ in calls)
 
 

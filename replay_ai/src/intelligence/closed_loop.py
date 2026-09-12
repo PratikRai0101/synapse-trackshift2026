@@ -144,6 +144,7 @@ class ClosedLoopSimulator:
             gap_s=max(0.0, self.ego.gap_s),
             active_aero=1.0 if self.ego.gap_s < 1.0 else 0.0,
             lap=self.current_lap,
+            time_s=self.time_s,
         )
 
     def step(self, command_override: str | None = None) -> SimulationStep:

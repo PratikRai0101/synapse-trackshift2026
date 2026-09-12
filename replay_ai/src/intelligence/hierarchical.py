@@ -57,6 +57,9 @@ class RivalTelemetry:
     sector: int = 0
     lap: int = 0
     tyre_life: float = 0.0
+    # Wall-clock time of the observation. Optional so existing callers keep
+    # working; the extractor falls back to ``sample_interval_s`` when absent.
+    time_s: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -68,6 +71,9 @@ class RivalFeatures:
     speed_variance: float
     aero: float
     tyre_life: float = 0.0
+    # How long the current super-clipping condition has persisted. Duration is
+    # more legible to a judge than a fraction, and is measured, not inferred.
+    clip_seconds: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -91,8 +97,11 @@ class FeatureExtractor:
     and compares each sample with prior completed laps from the same sector.
     """
 
-    def __init__(self, window: int = 5) -> None:
+    def __init__(self, window: int = 5, sample_interval_s: float = 0.04) -> None:
         self.window = max(1, int(window))
+        self.sample_interval_s = max(1e-3, float(sample_interval_s))
+        self._last_time: float | None = None
+        self._clip_seconds = 0.0
         self._current_lap: int | None = None
         self._current: Dict[int, List[Tuple[float, float]]] = defaultdict(list)
         self._history: Dict[int, Deque[Tuple[float, float]]] = defaultdict(
@@ -138,11 +147,26 @@ class FeatureExtractor:
         # form the conservative denominator; the result is a duration fraction,
         # not a one-frame depleted-battery assertion.
         counts = self._clip_counts[(lap, sector)]
+        clipped_now = False
         if float(o.throttle_pct) >= 98.0:
             counts[1] += 1
             if history and speed < baseline_speed - 1.0:
                 counts[0] += 1
+                clipped_now = True
         clipping_fraction = counts[0] / counts[1] if counts[1] else 0.0
+
+        # Duration evidence: accumulate while the clipped condition holds, reset
+        # the moment it breaks. Falls back to the nominal interval when callers
+        # do not provide a timestamp.
+        current_time = float(o.time_s)
+        if self._last_time is not None and current_time > self._last_time:
+            dt = current_time - self._last_time
+        else:
+            dt = self.sample_interval_s
+        if current_time > 0.0:
+            self._last_time = current_time
+        self._clip_seconds = (self._clip_seconds + dt) if clipped_now else 0.0
+
         gap_delta = (self._previous_gap - float(o.gap_s)
                      if self._previous_gap is not None else 0.0)
         self._previous_gap = float(o.gap_s)
@@ -153,6 +177,7 @@ class FeatureExtractor:
             brake - baseline_brake, variance,
             max(0.0, min(1.0, float(o.active_aero))),
             max(0.0, float(o.tyre_life)),
+            self._clip_seconds,
         )
 
 
