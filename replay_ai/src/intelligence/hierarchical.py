@@ -1,0 +1,220 @@
+"""Hierarchical motorsport intelligence backend for replay telemetry.
+
+This module is deliberately explicit about observability: FastF1 does not expose
+battery SOC or ECU deployment.  The HMM therefore estimates *belief over ERS
+modes* from public signals; ``soc_probabilities`` is not a sensor reading.
+The implementation is a deterministic, dependency-light reference backend that
+can later be replaced by fitted emissions, a neural lap map, or a full POMCP
+solver without changing the replay contract.
+"""
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+from enum import Enum
+from itertools import product
+from typing import Dict, Iterable, List, Mapping, Sequence, Tuple
+
+
+class ERSMode(str, Enum):
+    HIGH = "H"
+    MEDIUM = "M"
+    HARVEST = "Lharvest"
+    DERATE = "Lderate"
+
+
+class OverrideMode(str, Enum):
+    AVAILABLE = "available"
+    SPENT = "spent"
+
+
+class TyreState(str, Enum):
+    NEW = "new"
+    LIGHT = "light"
+    MODERATE = "moderate"
+    HEAVY = "heavy"
+    CLIFF = "cliff"
+
+
+HMMState = Tuple[ERSMode, OverrideMode, TyreState]
+STATES: Tuple[HMMState, ...] = tuple(product(ERSMode, OverrideMode, TyreState))
+
+
+@dataclass(frozen=True)
+class RivalTelemetry:
+    """Publicly available observation at a sector boundary.
+
+    ``active_aero`` is a normalized public aero/DRS proxy (0..1) when the
+    source has no direct aero channel.  ``sector`` is used to reset baselines.
+    """
+    speed_kmh: float
+    throttle_pct: float
+    brake: float
+    gap_s: float
+    active_aero: float = 0.0
+    sector: int = 0
+    lap: int = 0
+    tyre_life: float = 0.0
+
+
+@dataclass(frozen=True)
+class RivalFeatures:
+    dv_baseline: float
+    dgap: float
+    throttle_clip: float
+    brake_delta: float
+    speed_variance: float
+    aero: float
+
+
+@dataclass(frozen=True)
+class HMMResult:
+    belief: Mapping[HMMState, float]
+    ers_probabilities: Mapping[str, float]
+    most_likely_state: HMMState
+    features: RivalFeatures
+
+    @property
+    def estimated_soc_mode(self) -> str:
+        """Most likely ERS mode, explicitly an estimate from public telemetry."""
+        return max(self.ers_probabilities, key=self.ers_probabilities.get)
+
+
+class FeatureExtractor:
+    """Rolling-baseline feature extraction; no future samples are consulted."""
+
+    def __init__(self, window: int = 5) -> None:
+        self.window = max(1, int(window))
+        self._speed: List[float] = []
+        self._gaps: List[float] = []
+        self._brakes: List[float] = []
+        self._previous_gap = 0.0
+
+    def update(self, o: RivalTelemetry) -> RivalFeatures:
+        speed = float(o.speed_kmh)
+        baseline = sum(self._speed) / len(self._speed) if self._speed else speed
+        gap_delta = self._previous_gap - float(o.gap_s) if self._gaps else 0.0
+        brake_mean = sum(self._brakes) / len(self._brakes) if self._brakes else float(o.brake)
+        speeds = self._speed + [speed]
+        mean = sum(speeds) / len(speeds)
+        variance = sum((x - mean) ** 2 for x in speeds) / len(speeds)
+        # A clip is an observation, not proof of a depleted battery.
+        clip = 1.0 if float(o.throttle_pct) >= 98.0 and speed < baseline - 1.0 else 0.0
+        features = RivalFeatures(speed - baseline, gap_delta, clip,
+                                 float(o.brake) - brake_mean, variance,
+                                 max(0.0, min(1.0, float(o.active_aero))))
+        self._speed = (self._speed + [speed])[-self.window:]
+        self._gaps = (self._gaps + [float(o.gap_s)])[-self.window:]
+        self._brakes = (self._brakes + [float(o.brake)])[-self.window:]
+        self._previous_gap = float(o.gap_s)
+        return features
+
+
+class FortyStateHMM:
+    """Forward HMM over ERS x override x tyre (4 x 2 x 5 = 40 states)."""
+
+    def __init__(self, self_transition: float = 0.92, sigma: float = 1.0) -> None:
+        self.sigma = max(1e-6, float(sigma))
+        self.self_transition = max(0.0, min(1.0, float(self_transition)))
+        self._belief: Dict[HMMState, float] = {s: 1.0 / len(STATES) for s in STATES}
+        self._extractor = FeatureExtractor()
+
+    def observe(self, observation: RivalTelemetry) -> HMMResult:
+        """Extract causal features and process one sector observation."""
+        return self.update(self._extractor.update(observation))
+
+    @property
+    def belief(self) -> Dict[HMMState, float]:
+        return dict(self._belief)
+
+    def _expected(self, state: HMMState, f: RivalFeatures) -> Tuple[float, float, float]:
+        ers, override, tyre = state
+        # Means are interpretable initial priors and should be fitted on labelled
+        # telemetry before being presented as a validated physical estimator.
+        closure = {ERSMode.HIGH: .10, ERSMode.MEDIUM: .03,
+                   ERSMode.HARVEST: -.05, ERSMode.DERATE: .16}[ers]
+        clip = {ERSMode.HIGH: 0.00, ERSMode.MEDIUM: .05,
+                ERSMode.HARVEST: .08, ERSMode.DERATE: .55}[ers]
+        brake = .10 if override is OverrideMode.SPENT else 0.0
+        return closure, clip, brake
+
+    def update(self, features: RivalFeatures) -> HMMResult:
+        n = len(STATES)
+        switch = (1.0 - self.self_transition) / (n - 1)
+        predicted = {s: sum(self._belief[p] * (self.self_transition if p == s else switch)
+                            for p in STATES) for s in STATES}
+        likelihood: Dict[HMMState, float] = {}
+        for state in STATES:
+            closure, clip, brake = self._expected(state, features)
+            error = ((features.dgap - closure) ** 2 +
+                     (features.throttle_clip - clip) ** 2 +
+                     (features.brake_delta - brake) ** 2)
+            likelihood[state] = math.exp(-error / (2.0 * self.sigma ** 2))
+        weighted = {s: predicted[s] * likelihood[s] for s in STATES}
+        total = sum(weighted.values()) or 1.0
+        self._belief = {s: weighted[s] / total for s in STATES}
+        ers = {mode.value: sum(p for s, p in self._belief.items() if s[0] is mode)
+               for mode in ERSMode}
+        likely = max(self._belief, key=self._belief.get)
+        return HMMResult(self.belief, ers, likely, features)
+
+
+@dataclass(frozen=True)
+class SOHDecision:
+    soh: float
+    resistance: float
+    wear_cost: float
+    replace: bool
+
+
+class SeasonLifecycleManager:
+    """Small finite-horizon DP for retain/replace battery decisions."""
+    def __init__(self, races: int = 5, replacement_cost: float = 0.18) -> None:
+        self.races = max(1, races)
+        self.replacement_cost = replacement_cost
+
+    def decide(self, soh: float, temperature: float = 70.0) -> SOHDecision:
+        soh = max(0.0, min(1.0, soh))
+        resistance = 1.0 + (1.0 - soh) * (0.4 + max(0.0, temperature - 60.0) / 500.0)
+        retain = sum((1.0 - soh) * resistance * (i + 1) / self.races for i in range(self.races))
+        replace = retain > self.replacement_cost
+        return SOHDecision(1.0 if replace else soh, 1.0 if replace else resistance,
+                           self.replacement_cost if replace else retain, replace)
+
+
+@dataclass(frozen=True)
+class TacticalDecision:
+    command: str
+    target_speed_kmh: float
+    lambda_kin: float
+    lambda_b: float
+    envelope_feasible: bool
+    reason: str
+
+
+class MotorsportIntelligence:
+    """End-to-end sector/lap facade consumed by replay and training scripts."""
+    def __init__(self) -> None:
+        self.features = FeatureExtractor()
+        self.hmm = FortyStateHMM()
+        self.lifecycle = SeasonLifecycleManager()
+        self.last_hmm: HMMResult | None = None
+
+    def observe(self, observation: RivalTelemetry, own_speed_kmh: float = 0.0,
+                own_soc: float = 70.0, gap_s: float | None = None) -> TacticalDecision:
+        result = self.hmm.update(self.features.update(observation))
+        self.last_hmm = result
+        p = result.ers_probabilities
+        # Continuation-aware tactical rule: do not attack a likely counter-harvest.
+        if p[ERSMode.HARVEST.value] >= 0.40:
+            command, reason = "HARVEST", "rival may be hoarding energy"
+        elif p[ERSMode.DERATE.value] >= 0.40 and (gap_s if gap_s is not None else observation.gap_s) < 1.0:
+            command, reason = "BURN", "rival derate probability is high"
+        else:
+            command, reason = "PROACTIVE TRAP", "preserve reserve while probing response"
+        target = max(0.0, own_speed_kmh + (8.0 if command == "BURN" else 0.0))
+        # Reference convex-envelope proxy: never request a negative or absurd speed.
+        feasible = target <= 380.0 and own_soc >= 5.0
+        return TacticalDecision(command, target if feasible else own_speed_kmh,
+                                1.0 if command == "BURN" else 0.2,
+                                max(0.01, (100.0 - own_soc) / 100.0), feasible, reason)
