@@ -38,12 +38,14 @@ Use the venv at the repository root: `../.venv/bin/python`.
 | `evaluation/controllers.py` | reference, stationary (B_stat), posterior-mean (B_mean), ambiguity-aware (M) | wired |
 | `evaluation/calibration.py` | paired plant rollouts fitting gap-closure and rival-response models | done; identifiability open |
 | `evaluation/batch.py` | frozen paired batch, ablation matrix, failure accounting, paired deltas | done, tested |
+| `evaluation/splits.py` | development / calibration / test splits with shifted physics | done, tested |
+| `evaluation/report.py` | pitch bundle, claim ledger, split comparisons | done, tested |
 | `evaluation/runner.py` | deterministic episode, public-only `DecisionInput` | done, tested |
 | `cli.py` | validate-config, run, benchmark | done |
 
 ## Test coverage
 
-135 passing, 1 xfailed. Highlights:
+139 passing, 1 xfailed. Highlights:
 
 - **Battery:** OCV/current-root identity, energy conservation derivative,
   current/voltage/SOC saturation, cooling, no post-hoc SOC clipping.
@@ -84,8 +86,12 @@ Use the venv at the repository root: `../.venv/bin/python`.
   ``alpha=1``; minimax regret selects the action with the lowest worst regret.
 - **Batch and ablations:** seeded paired rows, failures retained, completion
   rates, per-seed paired deltas, and one-factor ablation variants. The
-  3-seed x 5-policy development batch shows M beating the reference by ~40 m
-  median paired gap with **zero** modeled contacts after the contact supervisor.
+  10-seed x 5-policy development batch shows M beating the reference by ~40 m
+  median paired gap with **zero** modeled contacts.
+- **Splits:** a `test` split shifts battery, grip, mass and tyre-wear parameters
+  and uses a quicker rival, with the controller's models calibrated on
+  development. The generated bundle records the honest result: M's contact
+  avoidance does **not** transfer (0 development vs 1 320 test contacts).
 - **Rules:** the FIA 2026 deployment envelope reproduces its breakpoints
   (350 kW through 290 km/h, taper to zero by 345 km/h; overtake retains 350 kW
   to 337.5 km/h); an UNKNOWN permission falls back to the normal envelope with

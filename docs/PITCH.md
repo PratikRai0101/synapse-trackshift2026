@@ -44,25 +44,49 @@ decisions against plausible rival responses and their later race consequences.
 
 ## Measured results
 
-Development split, 3 seeds × 5 rival policies, synthetic circuit, 25 s episodes.
-Paired on initial conditions. Failures retained.
+Generated from `artifacts/pitch_bundle.json`. Two splits, 10 seeds x 5 rival
+policies = 50 episodes per controller. Paired on initial conditions; failures
+retained.
+
+### Development split (baseline synthetic physics)
 
 | controller | median gap m | mean energy J | passes | contacts |
 |---|---:|---:|---:|---:|
 | reference | 47.86 | 125 023 | 0 | 0 |
-| stationary (base-paper assumption) | 14.31 | 2 203 298 | 3 | 1 590 |
-| posterior-mean | 20.92 | 1 685 338 | 3 | 1 671 |
-| convex planner only | 36.70 | 1 416 304 | 0 | 3 207 |
-| **M (proposed)** | **8.12** | 1 618 532 | 0 | **0** |
+| stationary (base-paper assumption) | 14.31 | 2 203 298 | 10 | 5 300 |
+| posterior-mean | 20.92 | 1 685 338 | 10 | 5 570 |
+| convex planner only | 36.70 | 1 416 304 | 0 | 10 690 |
+| **M (proposed)** | **8.09** | 1 635 114 | 0 | **0** |
 
-Ablations (same conditions, one factor removed):
+### Test split — shifted physics, held out
+
+Higher battery resistance, lower grip, heavier car, faster-wearing tyres, and a
+quicker-reacting rival. The controller's models are calibrated on the
+development split, not on this one.
+
+| controller | median gap m | mean energy J | contacts |
+|---|---:|---:|---:|
+| reference | 65.00 | 125 032 | 0 |
+| stationary | 0.29 | 2 161 295 | 6 110 |
+| posterior-mean | 37.22 | 1 719 952 | 5 910 |
+| convex planner only | 56.74 | 1 285 986 | 8 150 |
+| **M (proposed)** | **31.48** | 1 792 644 | **1 320** |
+
+**This is the most important slide.** M still beats the reference on position
+and remains the most frugal engaging controller, but its contact avoidance does
+not transfer: 0 contacts on development, 1 320 on the held-out split, because
+the contact supervisor projects the rival at its observed speed and the
+supervisor's limits were validated on development physics. The generated bundle
+records this as `not met on the held-out split`, and the pitch must say it.
+
+### Ablations (development split, 5 seeds)
 
 | variant | median gap m | contacts | reading |
 |---|---:|---:|---|
-| M − continued energy pricing | 7.57 | 0 | spends more for a marginal gain |
-| M − commitment margin | 8.03 | 41 | re-introduces contact |
-| M − belief update | 20.08 | 170 | costs 12 m and contact |
-| M − probe | 15.29 | 0 | costs 8 m |
+| M − continuation value | 7.57 | 0 | spends more for a marginal gain |
+| M − commitment margin | 7.95 | 41 | re-introduces contact |
+| M − belief update | 20.08 | 419 | costs 12 m and contact |
+| M − probe | 15.96 | 0 | costs 8 m |
 | M posterior-mean criterion | 7.66 | 0 | comparable to full M |
 
 The belief update and the probe are the two mechanisms that demonstrably earn
@@ -87,6 +111,9 @@ Generated, not asserted. Full list in `artifacts/pitch_bundle.json`.
 
 - No completed pass at the 25 s default episode: catch-up only.
 - POMCP has not been shown to beat posterior-mean planning under matched compute.
+- **Contact avoidance does not transfer to the held-out split** (0 → 1 320
+  contacts). The supervisor needs a model-error margin before this is a safety
+  claim.
 
 **Not measured / must not be claimed**
 
@@ -137,8 +164,9 @@ configuration. Event supplements are unresolved, so restricted modes are
 disabled and labelled unknown.
 
 **How do you know it is not scripted?** Seeded paired episodes, a frozen
-manifest, identical-information baselines, retained failures, and a claim ledger
-that marks two claims `not met`.
+manifest, identical-information baselines, retained failures, a held-out split
+with shifted physics, and a claim ledger that grades itself — including the
+held-out contact result, which is marked `not met`.
 
 ## Claims to remove from any slide
 

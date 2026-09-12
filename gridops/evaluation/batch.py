@@ -89,6 +89,7 @@ class EpisodeRow:
     rival_policy: str
     seed: int
     status: str
+    split: str = ""
     error: str | None = None
     final_gap_m: float | None = None
     ego_energy_spent_j: float | None = None
@@ -314,6 +315,7 @@ def run_batch(
                             rival_policy=policy_name,
                             seed=seed,
                             status="ok",
+                            split=manifest.split,
                             final_gap_m=report.final_gap_m,
                             ego_energy_spent_j=report.ego_energy_spent_j,
                             pass_events=report.pass_events,
@@ -330,6 +332,7 @@ def run_batch(
                             rival_policy=policy_name,
                             seed=seed,
                             status="error",
+                            split=manifest.split,
                             error=f"{type(exc).__name__}: {exc}",
                             runtime_s=time.perf_counter() - start,
                         )
