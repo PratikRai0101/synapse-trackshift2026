@@ -175,14 +175,19 @@ Fitting a pooled within-mode standard deviation per feature
 1. **Synthetic labels are not ground truth.** Accuracy above is measured against
    a generator, so it shows the *inference machinery* works, not that the
    inference is correct on real cars. No real ERS labels exist publicly.
-2. **No fitted transition matrix.** `self_transition` is a configured constant,
-   not estimated from data. Mode-switch timing is therefore not calibrated.
+2. **Transition calibration depends on labelled sequences.** The runtime can
+   load a fitted ERS transition matrix, but public-only races still lack the
+   hidden labels needed to estimate it.
 3. **Emission model is diagonal and Gaussian.** Real `dgap` is autocorrelated and
    heteroscedastic; a diagonal Gaussian with one pooled scale per feature cannot
    represent that.
 4. **`_expected()` means are priors, partly hand-set.** Only the ERS-derived
    entries are currently fitted; the override contribution is still a constant.
-5. **Levels 2 and 1 are transparent reference baselines, not production
+5. **SOH integration is currently a reference degradation model.** Battery
+   SOH now scales usable Level 3 energy, adds resistance/wear cost, and fades
+   under closed-loop throughput. The constants are not yet fitted to cell or
+   race battery data.
+6. **Levels 2 and 1 are transparent reference baselines, not production
    optimizers.** `lap_strategy.py` provides a fitted empirical lap-time map and
    finite-horizon battery allocation DP. `control_layers.py` provides a bounded
    grip envelope, three-action scenario planner, and pedal-aware execution

@@ -33,6 +33,18 @@ def test_planner_returns_one_target_per_lap_and_preserves_reserve():
     assert sum(target.deploy_energy for target in targets) <= 30
 
 
+def test_degraded_soh_reduces_usable_deployment():
+    planner = RaceEnergyPlanner(
+        fitted_map(),
+        StrategyConfig(lap_count=3, energy_step=5, minimum_reserve=5),
+    )
+    healthy = planner.plan(initial_energy=30, battery_soh=1.0)
+    degraded = planner.plan(initial_energy=30, battery_soh=0.6)
+    assert sum(target.deploy_energy for target in degraded) <= sum(
+        target.deploy_energy for target in healthy
+    )
+
+
 def test_more_energy_does_not_make_the_first_target_slower():
     planner = RaceEnergyPlanner(
         fitted_map(),

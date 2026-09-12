@@ -115,6 +115,8 @@ class StrategyConfig:
     minimum_reserve: float = 5.0
     wear_time_penalty: float = 0.15
     energy_time_gain: float = 0.04
+    soh_energy_floor: float = 0.60
+    resistance_time_penalty: float = 0.20
 
 
 class RaceEnergyPlanner:
@@ -125,12 +127,16 @@ class RaceEnergyPlanner:
         self.config = config or StrategyConfig()
 
     def plan(self, initial_energy: float, tyre_wear: float = 0.0,
-             mass_kg: float = 800.0) -> tuple[LapTarget, ...]:
+             mass_kg: float = 800.0, battery_soh: float = 1.0,
+             wear_cost: float = 0.0) -> tuple[LapTarget, ...]:
         if not self.lap_map.fitted:
             raise RuntimeError("lap-time map has not been fitted")
         cfg = self.config
         step = max(1e-6, cfg.energy_step)
-        energy_units = max(0, int(math.floor(initial_energy / step)))
+        soh = max(cfg.soh_energy_floor, min(1.0, float(battery_soh)))
+        usable_energy = initial_energy * soh
+        resistance_penalty = (1.0 - soh) * cfg.resistance_time_penalty
+        energy_units = max(0, int(math.floor(usable_energy / step)))
         # DP value is remaining race time; store chosen action for reconstruction.
         values: dict[tuple[int, int], float] = {}
         actions: dict[tuple[int, int], float] = {}
@@ -155,6 +161,7 @@ class RaceEnergyPlanner:
                     base = self.lap_map.predict(sample)
                     lap_time = base - cfg.energy_time_gain * energy
                     lap_time += cfg.wear_time_penalty * (tyre_wear + lap)
+                    lap_time += wear_cost + resistance_penalty
                     next_units = int(round(reserve / step))
                     score = lap_time + values[(lap + 1, next_units)]
                     candidates.append((score, energy))

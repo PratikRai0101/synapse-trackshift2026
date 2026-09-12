@@ -26,6 +26,18 @@ def test_runtime_loads_map_and_plans_once_per_lap(tmp_path):
     assert first.command in {"BURN", "HARVEST", "PROACTIVE TRAP"}
 
 
+def test_soh_is_tracked_and_degrades_with_deployment(tmp_path):
+    sim = ClosedLoopSimulator(
+        HiddenRivalMode.DEPLETE,
+        lap_map_artifact=str(map_artifact(tmp_path)),
+    )
+    initial_soh = sim.battery_soh
+    sim.run(25)
+    assert sim.battery_soh <= initial_soh
+    assert sim.battery_soh >= 0.60
+    assert sim.model.last_soh_decision is not None
+
+
 def test_closed_loop_tracks_runtime_lap_energy_target(tmp_path):
     sim = ClosedLoopSimulator(
         HiddenRivalMode.DEPLETE,
