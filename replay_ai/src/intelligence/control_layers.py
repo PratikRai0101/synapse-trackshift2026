@@ -12,6 +12,7 @@ from typing import Mapping, Sequence
 
 from .hierarchical import ERSMode, HMMResult
 from .socp_envelope import SOCPConfig, SOCPPerformanceEnvelope
+from .scenario_search import BoundedPOMCP, SearchConfig
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,7 @@ class Level2Plan:
     lambda_b: float
     action_scores: tuple[ScenarioAction, ...]
     envelope: EnvelopePoint
+    search_values: Mapping[str, float] | None = None
 
 
 class BoundedScenarioPlanner:
@@ -81,8 +83,10 @@ class BoundedScenarioPlanner:
     generative tree search can replace this class behind the same result shape.
     """
 
-    def __init__(self, envelope: PerformanceEnvelope | None = None) -> None:
+    def __init__(self, envelope: PerformanceEnvelope | None = None,
+                 search_config: SearchConfig | None = None) -> None:
         self.envelope = envelope or PerformanceEnvelope()
+        self.searcher = BoundedPOMCP(search_config)
 
     def plan(self, hmm: HMMResult, own_speed_kmh: float, gap_s: float,
              energy: float, curvature: float = 0.0) -> Level2Plan:
@@ -107,6 +111,13 @@ class BoundedScenarioPlanner:
             scored.append(ScenarioAction(command, cost, gap_gain, belief_value,
                                          score))
         selected = max(scored, key=lambda action: action.score)
+        search = self.searcher.search(hmm, gap_s, energy)
+        search_allowed = (
+            (search.action != "BURN" or p[ERSMode.DERATE.value] >= 0.40) and
+            (search.action != "HARVEST" or p[ERSMode.HARVEST.value] >= 0.40 or energy < 30.0)
+        )
+        if search_allowed:
+            selected = next(action for action in scored if action.command == search.action)
         envelope = self.envelope.point(0.0, curvature, own_speed_kmh)
         reference = tuple(min(envelope.speed_limit_kmh,
                               max(0.0, own_speed_kmh + selected.expected_gap_change_s * 20.0))
@@ -115,7 +126,7 @@ class BoundedScenarioPlanner:
                             for speed in reference)
         lambda_b = max(0.01, (100.0 - energy) / 100.0)
         return Level2Plan(selected.command, reference, lambda_kin, lambda_b,
-                          tuple(scored), envelope)
+                          tuple(scored), envelope, search.values)
 
 
 @dataclass(frozen=True)
