@@ -22,6 +22,10 @@ from .overtake import OvertakeAssessment, evaluate_overtake_window
 from .race_engineer import DecisionReport, RaceEngineer
 from .telemetry_adapter import PublicTelemetryFrame, PublicTelemetryAdapter
 from .lap_strategy import LapTimeSample, LapTimeMap, LapTarget, StrategyConfig, RaceEnergyPlanner
+from .closed_loop import (
+    HiddenRivalMode, SimulationConfig, CarState, PublicSimulationObservation,
+    SimulationStep, ClosedLoopSimulator,
+)
 from .control_layers import (
     EnvelopeConfig, EnvelopePoint, PerformanceEnvelope, ScenarioAction,
     Level2Plan, BoundedScenarioPlanner, Level1Command, FastExecutionController,
@@ -75,4 +79,10 @@ __all__ = [
     "BoundedScenarioPlanner",
     "Level1Command",
     "FastExecutionController",
+    "HiddenRivalMode",
+    "SimulationConfig",
+    "CarState",
+    "PublicSimulationObservation",
+    "SimulationStep",
+    "ClosedLoopSimulator",
 ]
