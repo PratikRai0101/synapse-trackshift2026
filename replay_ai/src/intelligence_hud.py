@@ -147,9 +147,20 @@ class RaceEngineerHUD:
         else:
             self._t("gap", "no car ahead", left + 104, y, 11, MUTED)
 
-        # --- advice row ---
+        # --- tactical inference row ---
         y = top - 140
-        self._t("advice", report.advice.reason, left + pad, y, 11, TEXT)
+        tactical = getattr(report, "tactical", None)
+        hmm = getattr(report, "rival_hmm", None)
+        if hmm is not None:
+            probs = hmm.ers_probabilities
+            probability_text = "  ".join(
+                f"{key} {float(probs.get(key, 0.0)) * 100:.0f}%"
+                for key in ("H", "M", "Lharvest", "Lderate")
+            )
+            command = tactical.command if tactical is not None else "INFERENCE"
+            self._t("advice", f"{command}  |  {probability_text}", left + pad, y, 10, TEXT)
+        else:
+            self._t("advice", report.advice.reason, left + pad, y, 11, TEXT)
 
     # -- helpers ------------------------------------------------------------
     def _draw_compliance(self, right_bound: float, y: float, report: DecisionReport) -> None:
