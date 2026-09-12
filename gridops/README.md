@@ -27,6 +27,7 @@ Use the venv at the repository root: `../.venv/bin/python`.
 | `simulation/rivals.py` | reactive policy families (stationary/matching/aggressive/conserving/delayed/ignoring) | done |
 | `decision/commitment.py` | pricing, reserve guard, no-progress guard, commitment ledger | done, tested |
 | `decision/pomcp.py` | POMCP history-tree search over a generative model | done, tested |
+| `decision/planning.py` | conditional convex deployment planner (CVXPY + Clarabel), DCP/residual/trust-region checks | done, tested |
 | `decision/tactical.py` | cheap surrogate generative model for POMCP | calibration open |
 | `decision/belief.py` | persistent particle belief, credible set, non-stationarity mixing | calibration open |
 | `race_value/lap_map.py` | monotone terminal resource value, reserve band | done, tested |
@@ -36,7 +37,7 @@ Use the venv at the repository root: `../.venv/bin/python`.
 
 ## Test coverage
 
-53 tests. Highlights:
+62 tests. Highlights:
 
 - **Battery:** OCV/current-root identity, energy conservation derivative,
   current/voltage/SOC saturation, cooling, no post-hoc SOC clipping.
@@ -51,6 +52,9 @@ Use the venv at the repository root: `../.venv/bin/python`.
   the history tree cannot branch on hidden state.
 - **Leakage:** `DecisionInput` has no prohibited fields; future observations are
   invisible; mutating hidden rival state does not change the input.
+- **Planner:** DCP verified, `optimal` status, primal residuals measured, power
+  and trust-region bounds enforced, corner limit respected, terminal reserve
+  floor held, scarce energy reduces deployment, infeasible targets reported.
 
 ## Conventions frozen at G0
 

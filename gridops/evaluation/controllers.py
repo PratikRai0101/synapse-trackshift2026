@@ -31,6 +31,7 @@ from ..decision.commitment import (
     should_commit,
 )
 from ..decision.pomcp import POMCP, SearchResult
+from ..decision.planning import ConditionalConvexPlanner, PlannerConfig
 from ..decision.tactical import SPEND_J, TacticalModel, TacticalParams, TacticalState
 from ..race_value.lap_map import TerminalValue
 from ..simulation.rivals import RivalPolicy
@@ -197,6 +198,61 @@ class PosteriorMeanPlanner:
             status="RECOMMEND",
             reason_codes=["POSTERIOR_MEAN"],
             action_values={f.value: c for f, c in costs.items()},
+            runtime_s=time.perf_counter() - start,
+        )
+
+    def notify_gap_change(self, gap_closed_m: float) -> None:
+        return None
+
+    def notify_commitment_outcome(self, attacked: bool, gained: bool) -> None:
+        return None
+
+
+class ConvexPlannerController:
+    """Executes the conditional convex deployment profile for a reference pace.
+
+    The plan is validated against its own primal residuals before execution;
+    an invalid or infeasible plan falls back to the reference and says so.
+    """
+
+    def __init__(
+        self,
+        planner: ConditionalConvexPlanner,
+        base_speed_mps: float = 85.0,
+    ) -> None:
+        self.planner = planner
+        self.base_speed_mps = base_speed_mps
+
+    def decide(self, decision_input: DecisionInput, budget_s: float) -> Decision:
+        start = time.perf_counter()
+        mass_kg = self.planner.vehicle.mass_kg
+        plan = self.planner.plan(
+            progress_m=decision_input.ego_progress_m,
+            speed_mps=decision_input.ego_speed_mps,
+            usable_energy_j=decision_input.ego_usable_energy_j,
+            base_speed_mps=self.base_speed_mps,
+            mass_kg=mass_kg,
+        )
+        ok, problems = self.planner.validate_plan(plan)
+        if not ok:
+            return Decision(
+                family=ActionFamily.REFERENCE,
+                p_k_dc_w=0.0,
+                target_speed_mps=_target_speed(
+                    ActionFamily.REFERENCE, decision_input.ego_speed_mps
+                ),
+                status="FALLBACK",
+                reason_codes=["PLAN_INVALID", *problems],
+                runtime_s=time.perf_counter() - start,
+            )
+        next_speed = float(plan.speed_mps[1]) if len(plan.speed_mps) > 1 else self.base_speed_mps
+        return Decision(
+            family=ActionFamily.REFERENCE,
+            p_k_dc_w=plan.first_power_w(),
+            target_speed_mps=next_speed,
+            status="RECOMMEND",
+            reason_codes=["CONVEX_PROFILE"],
+            action_values={},
             runtime_s=time.perf_counter() - start,
         )
 

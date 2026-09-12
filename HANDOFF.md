@@ -7,7 +7,7 @@ imported here.
 
 ## What is built and passing
 
-53 tests, `python -m pytest`. See `gridops/README.md` for the module table.
+62 tests, `python -m pytest`. See `gridops/README.md` for the module table.
 
 Working and verified:
 
@@ -27,6 +27,11 @@ Working and verified:
   deplete the battery to bankruptcy; with pricing the controlled run preserves
   the reserve, and the outcome-based belief update bounds the number of attempts.
 - Persistent particle belief with credible-set selection and non-stationary mixing.
+- **Conditional convex deployment planner** (`decision/planning.py`): CVXPY +
+  Clarabel second-order-cone subproblem over a spatial grid, frozen local
+  coefficients, trust region, measured primal residuals, DCP check, and an
+  infeasible-target path that is reported rather than hidden. Wired as the
+  `convex` controller.
 - Deterministic episode runner and a public-only decision input.
 - Leakage gate: hidden rival state and future samples cannot reach the controller.
 - CLI: `validate-config`, `run`, `benchmark`.
@@ -66,21 +71,26 @@ intervals.
    state exists; tyre compound/thermal/wear does not.
 5. **No public replay adapter.** The config produces synthetic observations;
    the replay repo would supply real ones.
-6. **No candidate-profile cache, no CVXPY planner.** The conditional convex
-   deployment planner is not implemented; the tactical layer currently maps
-   action families to fixed powers.
+6. **The plan is not yet realized inside M.** `ConvexPlannerController` runs the
+   planner standalone. The ambiguity-aware controller still maps action families
+   to fixed powers; it should call the planner to generate the profile for the
+   selected family.
+7. **Model mismatch is not reported per decision.** The planner's predicted
+   profile and the plant's realized trajectory are not yet compared in the
+   episode record.
 
 ## Next slices, by owner
 
 **Developer A (simulation/control)**
-1. Implement the conditional convex deployment planner (`decision/planning.py`)
-   with CVXPY + Clarabel, DCP check, trust region and primal residuals.
-   Replace `_power_for_family` with a per-state optimized profile.
+1. Realize the selected family with the convex planner inside
+   `AmbiguityAwareController` (replace `_power_for_family`) and record the
+   planner's predicted profile beside the plant's realized trajectory.
 2. Add the geometric passing model: kinematic bicycle, footprints, track
    containment, separation and persistence. Until then, every output stays
    catch-up only.
 3. Add tyre thermal/wear state to the plant and expose it as a grip modifier.
-4. Measure and report surrogate-vs-plant model mismatch per decision.
+4. Cache candidate profiles per valid state to keep planner cost outside the
+   rollout loop; benchmark cold vs warm solve time.
 
 **Developer B (evidence/evaluation)**
 1. **Calibrate the belief likelihood.** Either fit `_CLOSE_*` to plant
