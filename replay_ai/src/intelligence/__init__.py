@@ -22,6 +22,7 @@ from .overtake import OvertakeAssessment, evaluate_overtake_window
 from .race_engineer import DecisionReport, RaceEngineer
 from .telemetry_adapter import PublicTelemetryFrame, PublicTelemetryAdapter
 from .lap_strategy import LapTimeSample, LapTimeMap, LapTarget, StrategyConfig, RaceEnergyPlanner
+from .lap_dataset import extract_lap_samples
 from .closed_loop import (
     HiddenRivalMode, SimulationConfig, CarState, PublicSimulationObservation,
     SimulationStep, ClosedLoopSimulator,
@@ -71,6 +72,7 @@ __all__ = [
     "LapTarget",
     "StrategyConfig",
     "RaceEnergyPlanner",
+    "extract_lap_samples",
     "EnvelopeConfig",
     "EnvelopePoint",
     "PerformanceEnvelope",

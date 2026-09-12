@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Iterable, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 
 @dataclass(frozen=True)
@@ -55,6 +55,26 @@ class LapTimeMap:
             self._buckets[self._key(sample)].append(float(sample.lap_time_s))
             self._global.append(float(sample.lap_time_s))
         return self
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": "empirical-lap-time-map.v1",
+            "bin_width": self.bin_width,
+            "buckets": [
+                {"key": list(key), "values": values}
+                for key, values in self._buckets.items()
+            ],
+            "global": self._global,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "LapTimeMap":
+        result = cls(bin_width=float(data.get("bin_width", 5.0)))
+        result._global = [float(value) for value in data.get("global", [])]
+        for bucket in data.get("buckets", []):
+            key = tuple(int(value) for value in bucket["key"])
+            result._buckets[key] = [float(value) for value in bucket["values"]]
+        return result
 
     @property
     def fitted(self) -> bool:
