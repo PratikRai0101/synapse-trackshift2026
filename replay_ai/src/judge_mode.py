@@ -159,6 +159,8 @@ class JudgeModeSnapshot:
     observation_age_s: Optional[float] = None
     # Layers that recomputed for this observation, most recent first.
     replanned_layers: tuple[str, ...] = ()
+    # Recorded pit-lane state for the focus driver (observed, not predicted).
+    in_pit: bool = False
 
 
 @dataclass(frozen=True)
@@ -228,7 +230,8 @@ class JudgeModeModel:
     @classmethod
     def from_report(cls, report: Any, gap_s: Optional[float] = None,
                     timestamp_s: Optional[float] = None,
-                    observation_age_s: Optional[float] = None) -> JudgeModeSnapshot:
+                    observation_age_s: Optional[float] = None,
+                    in_pit: bool = False) -> JudgeModeSnapshot:
         tactical = getattr(report, "tactical", None)
         hmm = getattr(report, "rival_hmm", None)
         metrics = getattr(report, "runtime_metrics", {}) or {}
@@ -343,6 +346,7 @@ class JudgeModeModel:
             gap_s=gap_s,
             timestamp_s=timestamp_s,
             observation_age_s=observation_age_s,
+            in_pit=bool(in_pit),
         )
 
 
@@ -756,11 +760,13 @@ class JudgeModePanel:
         )
         total_laps = getattr(window, "total_laps", "-") or "-"
         context = f"{snapshot.driver} P{snapshot.position} • LAP {snapshot.lap}/{total_laps}"
+        if snapshot.in_pit:
+            context += " • IN PIT"
         if active_bookmark is not None and active_bookmark < len(bookmarks):
             bookmark = bookmarks[active_bookmark]
             context += f" • SCENARIO {bookmark.hotkey}: {bookmark.title}"
         self._t("context", context, left + width - pad, top - 34, 9,
-                 TEXT, bold=True, anchor_x="right")
+                 AMBER if snapshot.in_pit else TEXT, bold=True, anchor_x="right")
         # Explicit observation freshness: which replay sample produced the
         # belief, and how long ago it was computed (grows while paused).
         freshness_parts = []
@@ -1772,6 +1778,8 @@ class JudgePresentPanel:
         command_color = snapshot.command_color if snapshot else MUTED
         confidence = snapshot.confidence if snapshot else 0.0
 
+        if snapshot is not None and snapshot.in_pit:
+            driver = f"{driver}   •   IN PIT"
         self._t("present_driver",
                  f"{driver}   P{position}   •   LAP {lap}/{total_laps}",
                  left + pad, top - 28, 13, MUTED, bold=True)
