@@ -187,8 +187,14 @@ class FortyStateHMM:
     def __init__(self, self_transition: float = 0.92, sigma: float = 1.0,
                  emission_means: Mapping[str, Mapping[str, float]] | None = None,
                  emission_sigma: Mapping[str, float] | None = None,
-                 mode_transition: Mapping[str, Mapping[str, float]] | None = None) -> None:
+                 mode_transition: Mapping[str, Mapping[str, float]] | None = None,
+                 belief_floor: float = 0.02) -> None:
         self.sigma = max(1e-6, float(sigma))
+        # Mixing a little uniform mass into the posterior keeps the filter
+        # numerically valid when a feature error is extreme. Without it a large
+        # sector gap swing collapses the belief onto a single state and the
+        # panel reports a fabricated 100% confidence.
+        self.belief_floor = max(0.0, min(0.5, float(belief_floor)))
         self.self_transition = max(0.0, min(1.0, float(self_transition)))
         self._belief: Dict[HMMState, float] = {s: 1.0 / len(STATES) for s in STATES}
         self._extractor = FeatureExtractor()
@@ -213,6 +219,7 @@ class FortyStateHMM:
                  for mode, values in means.items()}
         kwargs.setdefault("emission_sigma", artifact.get("sigma") or None)
         kwargs.setdefault("mode_transition", artifact.get("transition") or None)
+        kwargs.setdefault("belief_floor", artifact.get("belief_floor", 0.02))
         return cls(emission_means=clean, **kwargs)
 
     def observe(self, observation: RivalTelemetry) -> HMMResult:
@@ -263,30 +270,54 @@ class FortyStateHMM:
 
         predicted = {s: sum(self._belief[p] * transition(p, s) for p in STATES)
                      for s in STATES}
-        likelihood: Dict[HMMState, float] = {}
+        predicted_total = sum(predicted.values())
+        if not math.isfinite(predicted_total) or predicted_total <= 0.0:
+            # A degenerate transition row must not empty the filter.
+            predicted = {s: 1.0 / n for s in STATES}
+        else:
+            predicted = {s: value / predicted_total for s, value in predicted.items()}
+
         # Diagonal Gaussian per feature. Scale falls back to the scalar sigma
         # for any feature the artifact did not supply.
         scales = tuple(
             max(1e-6, float(self.emission_sigma.get(name, self.sigma)))
             for name in ("dgap", "throttle_clip", "brake_delta")
         )
+        tyre_centres = {
+            TyreState.NEW: 2.0,
+            TyreState.LIGHT: 8.0,
+            TyreState.MODERATE: 18.0,
+            TyreState.HEAVY: 30.0,
+            TyreState.CLIFF: 45.0,
+        }
+        # All arithmetic is in log space. In linear space a realistic gap swing
+        # (double-digit seconds against a ~0.05 s fitted scale) drives every
+        # likelihood to exactly 0.0, and the previous `sum(...) or 1.0` guard
+        # then normalised an all-zero vector into an all-zero posterior.
+        log_joint: Dict[HMMState, float] = {}
         for state in STATES:
             closure, clip, brake = self._expected(state, features)
-            tyre_expected = {
-                TyreState.NEW: 2.0,
-                TyreState.LIGHT: 8.0,
-                TyreState.MODERATE: 18.0,
-                TyreState.HEAVY: 30.0,
-                TyreState.CLIFF: 45.0,
-            }[state[2]]
             error = (((features.dgap - closure) / scales[0]) ** 2 +
                      ((features.throttle_clip - clip) / scales[1]) ** 2 +
                      ((features.brake_delta - brake) / scales[2]) ** 2 +
-                     ((features.tyre_life - tyre_expected) / 10.0) ** 2)
-            likelihood[state] = math.exp(-0.5 * error)
-        weighted = {s: predicted[s] * likelihood[s] for s in STATES}
-        total = sum(weighted.values()) or 1.0
-        self._belief = {s: weighted[s] / total for s in STATES}
+                     ((features.tyre_life - tyre_centres[state[2]]) / 10.0) ** 2)
+            prior = predicted[state]
+            log_joint[state] = ((math.log(prior) if prior > 0.0 else -math.inf)
+                                - 0.5 * error)
+
+        peak = max(log_joint.values())
+        if not math.isfinite(peak):
+            posterior = {s: 1.0 / n for s in STATES}
+        else:
+            weights = {s: math.exp(value - peak)
+                       for s, value in log_joint.items()}
+            total = sum(weights.values())
+            posterior = {s: value / total for s, value in weights.items()}
+
+        floor = self.belief_floor
+        uniform = 1.0 / n
+        self._belief = {s: (1.0 - floor) * posterior[s] + floor * uniform
+                        for s in STATES}
         ers = {mode.value: sum(p for s, p in self._belief.items() if s[0] is mode)
                for mode in ERSMode}
         likely = max(self._belief, key=self._belief.get)

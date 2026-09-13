@@ -89,6 +89,11 @@ class ParticlePOMCP:
     def _make_particles(self, belief: HMMResult, gap_s: float, energy: float) -> list[RivalParticle]:
         modes = list(belief.ers_probabilities)
         weights = [max(0.0, belief.ers_probabilities[mode]) for mode in modes]
+        if sum(weights) <= 0.0:
+            # `random.choices` raises "Total of weights must be greater than
+            # zero". An upstream filter must never be able to blank the UI, so
+            # fall back to an uninformative prior instead of throwing.
+            weights = [1.0] * len(modes)
         count = max(1, self.config.particles)
         return [RivalParticle(self._rng.choices(modes, weights=weights, k=1)[0],
                               max(0.0, gap_s), max(0.0, energy))
