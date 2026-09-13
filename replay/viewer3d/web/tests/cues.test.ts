@@ -7,6 +7,7 @@ import {
   isDrsActive,
   orderCodes,
   shouldDrawConnector,
+  trackProgress,
 } from "../src/scene/cues";
 import type { DriverState, TrackGeometry } from "../src/net/protocol";
 
@@ -71,4 +72,35 @@ test("DRS zone ranges are sanitized before they reach geometry", () => {
     { start: 95, end: 200 },
   ]);
   expect(drsZoneRanges(null)).toEqual([]);
+});
+
+test("running order follows track geometry, not the payload's position field", () => {
+  // The payload's `position` is FastF1's distance-integrated order, while the
+  // 2D replay and every drawn x/y use projection onto the reference line. When
+  // the two disagree, listing by `position` puts the leaderboard and the
+  // AHEAD/BEHIND cue at odds with the cars actually rendered.
+  const drivers = {
+    GAS: driver({ position: 3, fraction: 0.30 }), // listed P3, but ahead on track
+    VER: driver({ position: 2, fraction: 0.28 }), // listed P2, but behind on track
+  };
+  expect(orderCodes(drivers)).toEqual(["GAS", "VER"]);
+  const cue = focusCue(drivers, "GAS", LAP)!;
+  expect(cue.position).toBe(1);
+  expect(cue.aheadCode).toBeNull();
+  expect(cue.behindCode).toBe("VER");
+  expect(cue.gapBehindS).toBeCloseTo((0.30 - 0.28) * LAP / 55.56);
+});
+
+test("progress falls back to the position field when fraction is missing", () => {
+  expect(trackProgress({ fraction: 0.5 })).toBe(0.5);
+  expect(trackProgress({ fraction: 0.5, position: 9 })).toBe(0.5);
+  // Legacy payload: position 1 must still outrank position 2.
+  expect(trackProgress({ position: 1 })).toBeGreaterThan(trackProgress({ position: 2 }));
+  expect(trackProgress({})).toBe(-Infinity);
+  // A lapped car with a higher fraction stays ahead.
+  const drivers = {
+    LEAD: driver({ position: 2, fraction: 9.4 }),
+    CHASER: driver({ position: 1, fraction: 9.6 }),
+  };
+  expect(orderCodes(drivers)).toEqual(["CHASER", "LEAD"]);
 });

@@ -3,6 +3,7 @@ import { useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { getActor } from "./actors";
+import { orderCodes } from "./cues";
 import { useViewerStore } from "../state/store";
 import { computeBounds } from "./world";
 
@@ -26,7 +27,7 @@ export function Lighting() {
     if (!light) return;
     const { drivers, followedDriver } = useViewerStore.getState();
     const code = followedDriver && drivers?.[followedDriver] ? followedDriver :
-      Object.entries(drivers ?? {}).find(([, driver]) => driver.position === 1)?.[0];
+      (drivers ? orderCodes(drivers)[0] : undefined);
     const actor = mode === "follow" && code ? getActor(code) : undefined;
     if (actor) light.target.position.copy(actor.position);
     else light.target.position.set(0, 0, 0);

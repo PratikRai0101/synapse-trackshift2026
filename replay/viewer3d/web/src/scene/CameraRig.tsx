@@ -5,6 +5,7 @@ import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import { useViewerStore } from "../state/store";
 import { getActor } from "./actors";
+import { orderCodes } from "./cues";
 import { computeBounds } from "./world";
 import { ChaseCamera, CHASE_VIEWS } from "./chase";
 
@@ -43,7 +44,7 @@ export function CameraRig() {
     if (!drivers) return;
     const code = followedDriver && drivers[followedDriver]
       ? followedDriver
-      : Object.entries(drivers).find(([, driver]) => driver.position === 1)?.[0];
+      : orderCodes(drivers)[0];
     if (!code) return;
     const actor = getActor(code);
     if (!actor) return;
