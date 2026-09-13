@@ -1,5 +1,5 @@
 import { useViewerStore } from "../state/store";
-import { focusCue } from "../scene/cues";
+import { focusCue, orderCodes } from "../scene/cues";
 import { surfaceSizes } from "../scene/surfaceSizes";
 
 const TYRE_LABEL: Record<number, string> = {
@@ -68,9 +68,11 @@ export function Hud() {
   const toggleLabels = useViewerStore((state) => state.toggleLabels);
 
   const leaderboard = drivers
-    ? Object.entries(drivers)
-        .sort(([, a], [, b]) => a.position - b.position)
-        .slice(0, 20)
+    ? orderCodes(drivers).map((code, index) => ({
+        // Derived rank, so the list order, the number and the drawn cars agree.
+        code,
+        driver: { ...drivers[code], position: index + 1 },
+      }))
     : [];
 
   const geometry = useViewerStore((state) => state.geometry);
@@ -206,7 +208,7 @@ export function Hud() {
 
       {leaderboard.length > 0 && (
         <aside className="hud__board">
-          {leaderboard.map(([code, driver]) => (
+          {leaderboard.map(({ code, driver }) => (
             <button
               className={`row ${followedDriver === code ? "row--selected" : ""}`}
               key={code}

@@ -148,6 +148,34 @@ All of it is a **rendering of public evidence**, not battery state. The replay's
 energy and overtake outputs are belief estimates; show those on the focus strip
 only from a real backend payload rather than recomputing them here.
 
+## Why the leaderboard can differ from the 2D app
+
+The payload carries **two different orderings** of the same field, and they drift
+apart over a stint:
+
+| Source | How it is derived |
+|---|---|
+| `position` (payload) | FastF1 `Distance` per lap, integrated |
+| `fraction` (payload) | projection of the car's `x`/`y` onto the reference line |
+
+Measured on the cached Italian GP race at the same frame: both sources advance at
+exactly the reported speed (ratios 1.001-1.004 against `speed`), so neither is
+jumping or glitched. They simply disagree by a roughly constant offset that
+accumulates over the race. At lap 9 the two orderings reverse GAS and VER, with
+about 110 m of accumulated drift between the two derivations.
+
+Everything drawn is placed from `x`/`y`, so the viewer orders by `fraction`
+(`trackProgress` in `scene/cues.ts`). Ordering by `position` instead would let the
+leaderboard and the AHEAD/BEHIND cue contradict the cars actually rendered, which
+is the reversal this replaced.
+
+**Tradeoff, stated plainly:** the 2D leaderboard re-sorts by `(lap, dist)`
+(`LeaderboardComponent.draw`), so in a drift case the 3D rank can differ from the
+2D rank by one place. The 3D view is self-consistent — list, cue and cars agree —
+but it does not reproduce the 2D numbers exactly. Single-sourcing the order in the
+backend would make both agree; that changes 2D leaderboard behaviour, so it is a
+deliberate decision rather than a rendering fix.
+
 ## Camera
 
 The **CAM** button in the HUD toggles between:

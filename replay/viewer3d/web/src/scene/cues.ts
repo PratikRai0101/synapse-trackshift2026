@@ -46,12 +46,34 @@ export function shouldDrawConnector(timeS: number | null): boolean {
   return timeS != null && Number.isFinite(timeS) && timeS <= MAX_CONNECTOR_SECONDS;
 }
 
-/** Track order, fastest first, matching the replay's `ordered_codes`. */
+/**
+ * Running order, fastest first, matching the 2D replay.
+ *
+ * The payload's `position` is FastF1's **integrated per-lap distance** ordering,
+ * while the 2D replay orders by projecting each car's x/y onto the reference
+ * line. Those are different derivations and they drift apart over a stint, so
+ * ordering by `position` can list a car behind one it is drawn ahead of.
+ *
+ * `fraction` is exactly what the replay orders by (`_project_to_reference`
+ * divided by the lap length, with completed laps included), so ordering by it
+ * agrees with the drawn geometry and with the 2D leaderboard.
+ */
+export function trackProgress(driver: {
+  fraction?: number;
+  position?: number;
+}): number {
+  const fraction = Number(driver?.fraction);
+  if (Number.isFinite(fraction)) return fraction;
+  // Legacy payload without `fraction`: fall back to the coarse position field.
+  const position = Number(driver?.position);
+  return Number.isFinite(position) ? -position : -Infinity;
+}
+
 export function orderCodes(
   drivers: Record<string, DriverState>,
 ): string[] {
   return Object.keys(drivers).sort(
-    (a, b) => (drivers[a].position ?? 99) - (drivers[b].position ?? 99),
+    (a, b) => trackProgress(drivers[b]) - trackProgress(drivers[a]),
   );
 }
 
@@ -99,7 +121,9 @@ export function focusCue(
   const self = drivers[code];
   return {
     code,
-    position: Number.isFinite(self.position) ? self.position : index + 1,
+    // Derived rank, so the number matches the list order, the drawn cars and
+    // the 2D HUD rather than the payload's independently-derived `position`.
+    position: index + 1,
     gapAheadS: ahead ? gapBetween(self.fraction, drivers[ahead].fraction, circuitLengthM).timeS : null,
     gapBehindS: behind ? gapBetween(self.fraction, drivers[behind].fraction, circuitLengthM).timeS : null,
     aheadCode: ahead,

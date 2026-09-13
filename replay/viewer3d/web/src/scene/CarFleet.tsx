@@ -164,9 +164,8 @@ export function CarFleet() {
     const dt = Math.min(delta, 0.1);
 
     // Stable order so instance indices line up between colours and matrices.
-    const codes = Object.keys(drivers).sort(
-      (a, b) => (drivers[a].position ?? 99) - (drivers[b].position ?? 99),
-    );
+    // Track order, matching the drawn geometry and the 2D leaderboard.
+    const codes = orderCodes(drivers);
 
     const entries: (ActorEntry & { color: THREE.Color })[] = [];
 
