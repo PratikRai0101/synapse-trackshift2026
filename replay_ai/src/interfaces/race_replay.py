@@ -1489,6 +1489,9 @@ class F1RaceReplayWindow(arcade.Window):
                 arcade.draw_circle_filled(mx, my, 3.0, colour)
             else:
                 arcade.draw_circle_filled(mx, my, 2.1, (120, 120, 132))
+            # Recorded pit-lane state: a white ring marks a car in the pits.
+            if pos.get("in_pit"):
+                arcade.draw_circle_outline(mx, my, 6.5, (255, 255, 255), 1.2)
 
     def _clear_intelligence_state(self):
         """Reset stateful inference after a non-linear replay seek."""
@@ -2363,6 +2366,11 @@ class F1RaceReplayWindow(arcade.Window):
                         gap_s=self._focus_gap_ahead_s,
                         timestamp_s=float(frame.get("t", 0.0) or 0.0),
                         observation_age_s=observation_age_s,
+                        in_pit=bool(
+                            frame.get("drivers", {})
+                            .get(report.code, {})
+                            .get("in_pit")
+                        ),
                     )
                     self.judge_panel.draw(
                         self,
