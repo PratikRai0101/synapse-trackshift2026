@@ -7,7 +7,8 @@ import { playback } from "../net/playback";
 import { useViewerStore } from "../state/store";
 import { trackHeading } from "./world";
 import { detectOverlaps, fitCarScales } from "./spacing";
-import { drsOpening, tyreColour } from "./appearance";
+import { drsOpening, steerAngle, tyreColour, wheelSpin } from "./appearance";
+import { WHEELBASE_M, WHEEL_RADIUS_M } from "./carParts";
 import { battleSet, orderCodes } from "./cues";
 
 /**
@@ -92,6 +93,10 @@ export function CarFleet() {
   const parts = useMemo(() => buildCarParts(), []);
   const revision = useRef(-1);
   const drsStates = useRef(new Map<string, number>());
+  /** Per car: accumulated wheel spin, steering angle and previous heading. */
+  const chassisStates = useRef(
+    new Map<string, { spin: number; steer: number; heading: number }>(),
+  );
   const carScale = useViewerStore((state) => state.carScale);
   const showLabels = useViewerStore((state) => state.showLabels);
 
@@ -139,6 +144,7 @@ export function CarFleet() {
       part: new THREE.Matrix4(),
       local: new THREE.Matrix4(),
       flap: new THREE.Matrix4(),
+      wheel: new THREE.Matrix4(),
       quaternion: new THREE.Quaternion(),
       euler: new THREE.Euler(),
       scale: new THREE.Vector3(1, 1, 1),
@@ -201,6 +207,9 @@ export function CarFleet() {
     for (const key of drsStates.current.keys()) {
       if (!activeKeys.has(key)) drsStates.current.delete(key);
     }
+    for (const key of chassisStates.current.keys()) {
+      if (!activeKeys.has(key)) chassisStates.current.delete(key);
+    }
     for (const [key, sprite] of labels) {
       if (activeKeys.has(key)) continue;
       group.remove(sprite);
@@ -228,11 +237,33 @@ export function CarFleet() {
       const opening = drsOpening(previousDrs ?? 0, drivers[actor.key]?.drs, dt,
         reset || store.paused || previousDrs === undefined);
       drsStates.current.set(actor.key, opening);
+
+      // Wheels follow the path the car actually took: spin uses reported speed,
+      // steering uses the actor's own observed yaw rate.
+      const previousChassis = chassisStates.current.get(actor.key);
+      const speed = drivers[actor.key]?.speed ?? 0;
+      const snap = reset || previousChassis === undefined;
+      const spin = wheelSpin(speed, WHEEL_RADIUS_M, dt,
+        previousChassis?.spin ?? 0, snap || store.paused);
+      const steer = steerAngle(previousChassis?.heading ?? actor.heading,
+        actor.heading, speed, WHEELBASE_M, dt,
+        snap ? 0 : previousChassis!.steer);
+      chassisStates.current.set(actor.key, { spin, steer, heading: actor.heading });
+
       for (let i = 0; i < meshes.length; i += 1) {
         scratch.local.copy(parts[i].matrix);
         if (parts[i].animation === "drs") {
           scratch.flap.makeRotationX(-.6 * opening);
           scratch.local.multiply(scratch.flap);
+        } else if (parts[i].wheel) {
+          // Placement, then steer about the vertical axis, then spin about the
+          // axle. Rear wheels do not steer.
+          if (parts[i].wheel!.axle === "front") {
+            scratch.wheel.makeRotationY(steer);
+            scratch.local.multiply(scratch.wheel);
+          }
+          scratch.wheel.makeRotationX(spin);
+          scratch.local.multiply(scratch.wheel);
         }
         scratch.part.multiplyMatrices(scratch.car, scratch.local);
         meshes[i].setMatrixAt(index, scratch.part);

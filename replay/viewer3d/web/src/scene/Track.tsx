@@ -6,6 +6,7 @@ import { buildStripGeometry, computeBounds, sceneX, sceneZ } from "./world";
 import { insetEdge } from "./trackDetails";
 import { drsZoneRanges } from "./cues";
 import { kerbGeometry, kerbTexture, planarUVs, surfaceTexture } from "./surfaces";
+import { surfaceSizes } from "./surfaceSizes";
 
 /**
  * The circuit surface: asphalt ribbon, alternating kerbs, ground plane and a
@@ -78,10 +79,15 @@ export function Track() {
 
     // Match the car's world-space scale, not a percentage of the stylized
     // ribbon. This avoids gigantic kerbs on wide source geometry.
-    const { x: innerKerbNearX, y: innerKerbNearY } = insetEdge(iX, iY, x, y, .9);
-    const { x: outerKerbNearX, y: outerKerbNearY } = insetEdge(oX, oY, x, y, .9);
-    const innerPaint = insetEdge(innerKerbNearX, innerKerbNearY, x, y, .15);
-    const outerPaint = insetEdge(outerKerbNearX, outerKerbNearY, x, y, .15);
+    // Marker sizes come from the width the payload declares, so kerbs, edge
+    // lines and DRS markings stay proportionate to the surface actually drawn.
+    const sizes = surfaceSizes(geometry);
+
+    // Real-world kerb and edge-line widths, not a fraction of the ribbon.
+    const { x: innerKerbNearX, y: innerKerbNearY } = insetEdge(iX, iY, x, y, sizes.kerb);
+    const { x: outerKerbNearX, y: outerKerbNearY } = insetEdge(oX, oY, x, y, sizes.kerb);
+    const innerPaint = insetEdge(innerKerbNearX, innerKerbNearY, x, y, sizes.edgeLine);
+    const outerPaint = insetEdge(outerKerbNearX, outerKerbNearY, x, y, sizes.edgeLine);
     const innerLine = toGeometry(buildStripGeometry(innerKerbNearX, innerKerbNearY, innerPaint.x, innerPaint.y, origin, .025));
     const outerLine = toGeometry(buildStripGeometry(outerKerbNearX, outerKerbNearY, outerPaint.x, outerPaint.y, origin, .025));
 
@@ -114,7 +120,7 @@ export function Track() {
         outerSliceY,
         slice(x),
         slice(y),
-        1.4,
+        sizes.drsMarking,
       );
       return toGeometry(
         buildStripGeometry(outerSliceX, outerSliceY, innerSliceX, innerSliceY, origin, 0.035, undefined, false),
@@ -129,6 +135,7 @@ export function Track() {
     return {
       ground,
       asphalt,
+      sizes,
       innerKerb,
       outerKerb,
       innerLine,

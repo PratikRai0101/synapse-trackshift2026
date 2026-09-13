@@ -9,7 +9,39 @@ export interface CarPart {
   colored?: boolean;
   tyreColored?: boolean;
   animation?: "drs";
+  /** Set for wheel parts. Geometry is built in wheel-local space, centred on
+   * the wheel axis, so the same mesh can spin and steer without a re-bake. */
+  wheel?: { index: 0 | 1 | 2 | 3; axle: "front" | "rear" };
 }
+
+/**
+ * Physical envelope of the rendered model.
+ *
+ * These must stay equal to `replay_ai`'s `CarPose` defaults (5.5 m long,
+ * 2.0 m wide). The engine decides contact from that envelope, so a wider mesh
+ * would let the viewer draw two cars appearing to touch while the simulator
+ * reports clearance. `web/tests/appearance.test.ts` locks the agreement.
+ */
+export const CAR_DIMENSIONS = { length: 5.5, width: 2.0 } as const;
+
+/** Wheel geometry from the real limits: 2.0 m overall width, front narrower. */
+const WHEELS = [
+  { z: 1.55, centreX: 0.80, width: 0.305, radius: 0.35 },   // front
+  { z: -1.72, centreX: 0.775, width: 0.405, radius: 0.35 }, // rear
+] as const;
+
+/** Wheel placement in car-local space. `index` is 0..3, and each wheel's
+ * geometry is baked around the origin so it can spin about its own axle. */
+export const WHEEL_PLACEMENTS = [
+  { z: WHEELS[0].z, x: -WHEELS[0].centreX, axle: "front" as const },
+  { z: WHEELS[0].z, x: WHEELS[0].centreX, axle: "front" as const },
+  { z: WHEELS[1].z, x: -WHEELS[1].centreX, axle: "rear" as const },
+  { z: WHEELS[1].z, x: WHEELS[1].centreX, axle: "rear" as const },
+] as const;
+
+export const WHEEL_RADIUS_M = WHEELS[0].radius;
+/** Distance between axles, used to derive steering from observed yaw rate. */
+export const WHEELBASE_M = WHEELS[0].z - WHEELS[1].z;
 
 /** Elliptical body sections [z, half-width, centre-height, half-height]. */
 function bodywork(sections: number[][]): THREE.BufferGeometry {
@@ -54,8 +86,8 @@ export function buildCarParts(): CarPart[] {
   const light = new THREE.MeshStandardMaterial({ color: 0xff2020, emissive: 0xff0808, emissiveIntensity: 2 });
   const parts: CarPart[] = [];
   type Point = [number, number, number];
-  const add = (geometry: THREE.BufferGeometry, material: THREE.Material, position: Point = [0, 0, 0], rotation: Point = [0, 0, 0]) => {
-    parts.push({ geometry, material, colored: material === paint, matrix: new THREE.Matrix4().compose(
+  const add = (geometry: THREE.BufferGeometry, material: THREE.Material, position: Point = [0, 0, 0], rotation: Point = [0, 0, 0], wheel: CarPart["wheel"] = undefined) => {
+    parts.push({ geometry, material, wheel, colored: material === paint, matrix: new THREE.Matrix4().compose(
       new THREE.Vector3(...position),
       new THREE.Quaternion().setFromEuler(new THREE.Euler(...rotation)),
       new THREE.Vector3(1, 1, 1),
@@ -73,11 +105,11 @@ export function buildCarParts(): CarPart[] {
   add(bodywork([[-2.15, .14, .43, .15], [-1.3, .34, .52, .24], [0, .42, .56, .25], [.8, .34, .55, .22], [1.6, .16, .43, .13], [2.65, .09, .31, .08]]), paint);
   add(bodywork([[-1.9, .08, .65, .08], [-.85, .27, .72, .29], [-.32, .22, .92, .38], [-.12, .17, .91, .29]]), paint);
   box([.22, .14, .025], carbon, [0, 1.12, -.105]); // air intake
-  box([1.65, .065, 2.7], carbon, [0, .16, -.6]);
+  box([1.55, .065, 2.1], carbon, [0, .16, -.3]);
   for (const side of [-1, 1]) {
     add(bodywork([[-1.65, .13, .36, .12], [-.7, .34, .46, .2], [.35, .35, .49, .23], [.6, .24, .5, .17]]), paint, [side * .56, 0, 0]);
     box([.36, .16, .025], carbon, [side * .6, .52, .61]);
-    box([.055, .13, 2.4], carbon, [side * .84, .22, -.65]);
+    box([.055, .13, 1.8], carbon, [side * .84, .22, -.4]);
     rod([side * .28, .64, .7], [side * .64, .72, .82], .018);
     box([.17, .085, .16], paint, [side * .65, .73, .82]);
     // Twin wishbones at both axles.
@@ -98,7 +130,7 @@ export function buildCarParts(): CarPart[] {
     box([.045, .46, .56], paint, [side * .53, .9, -2.35]);
     rod([side * .2, .35, -1.95], [side * .2, .94, -2.28], .028);
   }
-  for (const x of [-.6, -.3, 0, .3, .6]) box([.025, .15, .48], carbon, [x, .21, -1.95], [-.18, 0, 0]);
+  for (const x of [-.6, -.3, 0, .3, .6]) box([.025, .15, .48], carbon, [x, .21, -1.28], [-.18, 0, 0]);
   box([.12, .1, .05], light, [0, .38, -2.2]);
 
   // Recessed cockpit, driver helmet, visor and supported halo.
@@ -116,35 +148,72 @@ export function buildCarParts(): CarPart[] {
   rod([0, .64, .83], [0, 1.01, .79], .028);
 
   // Rounded slick tyres with inset wheel covers, hubs and sidewall rings.
-  for (const z of [1.55, -1.72]) {
-    for (const side of [-1, 1]) {
-      const width = z < 0 ? .4 : .33;
-      const x = side * .91;
-      const tyre = new THREE.CylinderGeometry(.35, .35, width, 32);
-      add(tyre, rubber, [x, .35, z], [0, 0, Math.PI / 2]);
-      for (const face of [-1, 1]) {
-        const faceX = x + face * (width / 2 + .002);
-        add(new THREE.CylinderGeometry(.23, .23, .012, 24), carbon, [faceX, .35, z], [0, 0, Math.PI / 2]);
-        add(new THREE.CylinderGeometry(.075, .075, .018, 12), metal, [faceX + face * .012, .35, z], [0, 0, Math.PI / 2]);
-        add(new THREE.TorusGeometry(.287, .007, 6, 32), stripe, [faceX, .35, z], [0, Math.PI / 2, 0]);
-        add(new THREE.TorusGeometry(.31, .04, 8, 32), rubber, [x + face * (width / 2 - .035), .35, z], [0, Math.PI / 2, 0]);
-      }
+  // Wheel centres sit inboard so the tyre outer face is the car's widest point,
+  // keeping the built model inside the engine's declared 2.0 m envelope.
+  // Each wheel's parts are baked around its own origin, so the renderer can
+  // spin and steer it without rebuilding geometry.
+  WHEEL_PLACEMENTS.forEach((placement, wheelIndex) => {
+    const { width, radius } = WHEELS[placement.axle === "front" ? 0 : 1];
+    const wheel = { index: wheelIndex as 0 | 1 | 2 | 3, axle: placement.axle };
+    // Local space: the wheel centre is the origin, the axle runs along X.
+    add(new THREE.CylinderGeometry(radius, radius, width, 32), rubber,
+      [0, 0, 0], [0, 0, Math.PI / 2], wheel);
+    for (const face of [-1, 1]) {
+      const faceX = face * (width / 2 + .002);
+      add(new THREE.CylinderGeometry(.23, .23, .012, 24), carbon, [faceX, 0, 0], [0, 0, Math.PI / 2], wheel);
+      add(new THREE.CylinderGeometry(.075, .075, .016, 12), metal, [faceX + face * .008, 0, 0], [0, 0, Math.PI / 2], wheel);
+      add(new THREE.TorusGeometry(.287, .007, 6, 32), stripe, [faceX, 0, 0], [0, Math.PI / 2, 0], wheel);
+      add(new THREE.TorusGeometry(.31, .04, 8, 32), rubber, [face * (width / 2 - .035), 0, 0], [0, Math.PI / 2, 0], wheel);
     }
-  }
+  });
   // Bake static details into one instanced batch per material, rather than
-  // paying a draw call for every suspension rod, wheel ring and aero element.
-  const batches: CarPart[] = [];
-  for (const material of [paint, carbon, rubber, metal, visor, stripe, light]) {
-    const geometries = parts.filter((part) => part.material === material).map((part) => {
-      part.geometry.applyMatrix4(part.matrix);
-      part.geometry.deleteAttribute("uv");
-      return part.geometry;
-    });
+  // paying a draw call for every suspension rod and aero element. Wheels are
+  // kept out of those merges and batched per wheel, because they animate: their
+  // geometry stays wheel-centred and the placement translation is the batch
+  // matrix, so steering and spin compose at render time.
+  const bake = (part: CarPart) => {
+    part.geometry.applyMatrix4(part.matrix);
+    part.geometry.deleteAttribute("uv");
+    return part.geometry;
+  };
+  const merge = (geometries: THREE.BufferGeometry[]) => {
     const geometry = mergeGeometries(geometries);
     if (!geometry) throw new Error("Unable to batch car geometry");
-    batches.push({ geometry, material, matrix: new THREE.Matrix4(), colored: material === paint, tyreColored: material === stripe });
     for (const source of geometries) source.dispose();
+    return geometry;
+  };
+
+  const batches: CarPart[] = [];
+  const materials = [paint, carbon, rubber, metal, visor, stripe, light];
+
+  for (const material of materials) {
+    const geometries = parts
+      .filter((part) => part.material === material && !part.wheel)
+      .map(bake);
+    if (!geometries.length) continue;
+    batches.push({
+      geometry: merge(geometries), material, matrix: new THREE.Matrix4(),
+      colored: material === paint, tyreColored: material === stripe,
+    });
   }
+
+  WHEEL_PLACEMENTS.forEach((placement, wheelIndex) => {
+    for (const material of materials) {
+      const geometries = parts
+        .filter((part) => part.material === material && part.wheel?.index === wheelIndex)
+        .map(bake);
+      if (!geometries.length) continue;
+      // Placement only; steering and spin are applied per frame by CarFleet.
+      batches.push({
+        geometry: merge(geometries), material,
+        matrix: new THREE.Matrix4().setPosition(
+          placement.x, WHEEL_RADIUS_M, placement.z),
+        colored: material === paint, tyreColored: material === stripe,
+        wheel: { index: wheelIndex as 0 | 1 | 2 | 3, axle: placement.axle },
+      });
+    }
+  });
+
   // The top rear-wing element gets one additional instanced draw. Its geometry
   // is local to the rear hinge so opening it never rotates the whole car.
   const flap = new THREE.BoxGeometry(1.03, .045, .17);

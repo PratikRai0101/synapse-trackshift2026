@@ -62,6 +62,10 @@ export interface TrackGeometry {
   x_outer: number[];
   y_outer: number[];
   rotation_deg: number;
+  /** Measured ribbon width in source units, so the viewer never hard-codes it. */
+  track_width?: number;
+  /** "schematic_constant_offset" when the ribbon is a constant normal offset. */
+  track_width_kind?: string;
   /** Index ranges into the outer edge. Reused from the 2D replay's zones. */
   drs_zones?: { start: number; end: number }[];
 }

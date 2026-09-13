@@ -1,4 +1,5 @@
 import type { Actor } from "./actors";
+import { CAR_DIMENSIONS } from "./carParts";
 
 /** Explicit user magnification only. Never hide overlap by shrinking a car. */
 export function fitCarScales(actors: readonly Actor[], requestedScale: number): number[] {
@@ -9,7 +10,9 @@ export function fitCarScales(actors: readonly Actor[], requestedScale: number): 
  * response. The simulator owns physical motion; recorded observations remain intact. */
 export function detectOverlaps(actors: readonly Actor[], requestedScale = 1): Set<string> {
   // Conservative oriented bounds enclose the complete car, including wings.
-  const halfWidth = 1.15, halfLength = 3;
+  // These are the same extents the engine uses for contact, so a viewer
+  // overlap warning and a simulated contact decision agree.
+  const halfWidth = CAR_DIMENSIONS.width / 2, halfLength = CAR_DIMENSIONS.length / 2;
   const overlaps = new Set<string>();
   const axes = actors.map((actor) => {
     const sin = Math.sin(actor.heading), cos = Math.cos(actor.heading);
