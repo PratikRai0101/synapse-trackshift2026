@@ -18,6 +18,10 @@ export function toMetres(message: TelemetryMessage): TelemetryMessage {
       for (const key of ["x", "y", "x_inner", "y_inner", "x_outer", "y_outer"] as const) {
         converted[key] = geometry[key].map((value) => value * scale);
       }
+      // The declared ribbon width is in the same units as X/Y, so it converts too.
+      if (Number.isFinite(geometry.track_width)) {
+        converted.track_width = geometry.track_width! * scale;
+      }
       cache.set(scale, converted);
     }
     geometry = converted;

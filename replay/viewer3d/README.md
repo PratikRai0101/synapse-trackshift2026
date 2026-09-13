@@ -168,8 +168,8 @@ The **CAM** button in the HUD toggles between:
 - Tyre sidewall colours follow reported compound IDs; unknown values use grey.
 - The top rear-wing flap follows the replay's existing DRS flag convention. It
   animates visually but does not change drag, authorize DRS or predict a pass.
-- Cars use eight instanced material/animation batches for the whole field; the
-  independently moving flap adds one draw beyond the seven static batches.
+- Batching: 4 merged body materials, 16 per-wheel batches so wheels can spin
+  and steer independently, and one DRS flap.
 
 This pass does not reconstruct surveyed track widths or add elevation.
 
@@ -177,8 +177,48 @@ These are the **remaining** realism gaps, tracked so they are not mistaken for
 done:
 
 - no surveyed track width, runoff, barriers or elevation;
-- no wheel rotation, steering angle or brake glow (only DRS is animated);
+- no brake glow or suspension travel;
 - no camera distance/height control beyond the three presets.
+
+## Scale agreement
+
+The three things that must agree, and how each is held to the others:
+
+| Quantity | Value | Enforced by |
+|---|---|---|
+| Units | metres after normalization | `net/coordinates.ts`, `realism.test.ts` |
+| Car envelope | 5.5 m x 2.0 m | `CAR_DIMENSIONS`, asserted against the built mesh |
+| Engine contact envelope | `CarPose(5.5, 2.0)` | `replay_ai/tests/test_race_physics.py` |
+
+The pair of tests is deliberate: the engine decides contact from 5.5 m x 2.0 m,
+so a mesh wider than that would let the viewer draw a touch the simulator does
+not model. The mesh is 1.99 m x 5.48 m, just inside the envelope, and
+`spacing.ts` uses the same extents so an `AMBIGUOUS` warning and a simulated
+contact decision cannot disagree.
+
+**Track width is declared, not assumed.** The ribbon is a constant normal
+offset from the centreline, so its width is a property of the data rather than a
+surveyed circuit. The payload states it (`track_geometry.track_width`) and says
+it is schematic (`track_width_kind`). Kerb, edge-line and DRS-marking sizes are
+derived from that declared width (`scene/surfaceSizes.ts`) instead of a
+duplicated metre constant, and the HUD shows `TRACK 20.0m SCHEMATIC`. Real
+circuits are ~12-15 m; the fallback when nothing is declared is 14 m.
+
+Animated details are driven by observed motion, never by invented state:
+
+- **DRS flap** follows the replay's existing flag convention. It does not change
+  drag, authorize DRS or predict a pass.
+- **Wheel spin** converts reported speed into rotation using the rendered radius.
+  It is a display of distance already travelled.
+- **Steering** uses the kinematic relation `tan(delta) = wheelbase * yawRate / speed`
+  from the actor's own heading change, clamped to 0.55 rad and smoothed. At rest
+  the ratio is unstable, so speed is floored rather than dividing by zero. It
+  never feeds back into motion.
+- **Tyre sidewalls** follow reported compound IDs; unknown values stay grey.
+
+Wheels are baked around their own axle and batched per wheel, so `CarFleet` can
+compose placement, steer and spin per frame without rebuilding geometry. That
+costs 16 instanced draws instead of 4 merged ones; the whole field is 21 batches.
 
 ## Simulation mode
 

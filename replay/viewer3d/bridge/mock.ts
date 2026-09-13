@@ -75,6 +75,9 @@ function buildGeometry() {
     x_outer: xOuter,
     y_outer: yOuter,
     rotation_deg: 0,
+    // Declared like the recorded payload does, so markings are data-derived.
+    track_width: halfWidth * 2,
+    track_width_kind: "synthetic_fixture",
     // Two synthetic DRS zones so the viewer's cue layer has something to draw.
     drs_zones: [
       { start: Math.floor(POINTS * 0.05), end: Math.floor(POINTS * 0.2) },

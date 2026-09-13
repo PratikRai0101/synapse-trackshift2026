@@ -1,5 +1,6 @@
 import { useViewerStore } from "../state/store";
 import { focusCue } from "../scene/cues";
+import { surfaceSizes } from "../scene/surfaceSizes";
 
 const TYRE_LABEL: Record<number, string> = {
   1: "S",
@@ -72,6 +73,9 @@ export function Hud() {
         .slice(0, 20)
     : [];
 
+  const geometry = useViewerStore((state) => state.geometry);
+  const sizes = surfaceSizes(geometry);
+
   return (
     <div className="hud">
       {runMode !== "unknown" && (
@@ -102,6 +106,14 @@ export function Hud() {
           <span className="mode__note" title={`${motionProvenance} | ${geometryProvenance}`}>
             PROVENANCE
           </span>
+          {sizes.declared && (
+            <span
+              className="mode__note"
+              title={`Declared ribbon width ${sizes.trackWidth.toFixed(1)} m${sizes.schematic ? " as a constant offset from the centreline, not a surveyed circuit width" : ""}`}
+            >
+              TRACK {sizes.trackWidth.toFixed(1)}m{sizes.schematic ? " SCHEMATIC" : ""}
+            </span>
+          )}
         </div>
       )}
       <header className="hud__bar">

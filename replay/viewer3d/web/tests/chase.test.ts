@@ -35,11 +35,27 @@ test("heading wrap uses short rotation and reset immediately reframes", () => {
   expect(rig.position.toArray()).toEqual([500, 5, 489]);
 });
 
-test("detailed model stays within a real car envelope and uses eight batches", () => {
+test("model batches keep wheels and the DRS flap independently animatable", () => {
   const parts = buildCarParts();
-  expect(parts.length).toBe(8);
-  expect(parts.filter((part) => part.animation === "drs").length).toBe(1);
-  expect(parts.filter((part) => part.tyreColored).length).toBe(1);
+  const wheels = parts.filter((part) => part.wheel);
+  const drs = parts.filter((part) => part.animation === "drs");
+  expect(drs.length).toBe(1);
+  // Four wheels, and every wheel batch is fully tagged so the renderer can spin
+  // and steer it without touching the merged bodywork.
+  expect(wheels.length).toBe(16);
+  expect([...new Set(wheels.map((part) => part.wheel!.index))].sort()).toEqual([0, 1, 2, 3]);
+  expect(wheels.filter((part) => part.wheel!.axle === "front").length).toBe(8);
+  expect(parts.filter((part) => !part.wheel && !part.animation).length).toBe(4);
+  // One tyre-compound batch per wheel, so compound colour follows the tyres.
+  expect(parts.filter((part) => part.tyreColored).length).toBe(4);
+  for (const part of parts) {
+    part.geometry.dispose();
+    part.material.dispose();
+  }
+});
+
+test("detailed model stays within a real car envelope", () => {
+  const parts = buildCarParts();
   const bounds = new THREE.Box3();
   for (const part of parts) {
     part.geometry.computeBoundingBox();
