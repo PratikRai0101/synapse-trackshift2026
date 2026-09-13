@@ -270,6 +270,30 @@ The `PitWallWindow` base class handles all telemetry stream connection logic aut
 - Run the example: `python -m src.gui.example_pit_wall_window`
 - Test the menu: `python -m src.gui.insights_menu`
 
+## Streaming a simulated branch to the 3D viewer
+
+`viewer3d` can render an evaluated counterfactual instead of the recording. This
+is a separate process on the same telemetry port the bridge already reads, and
+every payload is marked `run_mode: "simulated"`:
+
+```bash
+cd replay_ai
+.venv/bin/python scripts/simulate_stream.py --action BURN   # or HARVEST, "PROACTIVE TRAP", or omit for the reference policy
+# then, in another terminal:
+cd ../replay/viewer3d && bun run dev
+```
+
+The branch runs `ClosedLoopSimulator` from a documented synthetic start state and
+projects its longitudinal plant distance onto a synthetic display loop, because
+the plant does not model a racing line or a pit lane. That projection is declared
+in `motion_provenance`. The hidden rival mode used for evaluation is never
+published.
+
+Observed spread over a 2 s branch from the default start state (BURN vs
+HARVEST): 35 km/h and 11 m. The tactical action now reaches the plant through
+Level 1 power bounds, so a branch changes physical state rather than only
+bookkeeping.
+
 ## Customization
 
 - Change track width, colors, and UI layout in `src/arcade_replay.py`.
