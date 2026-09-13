@@ -1,10 +1,11 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { buildCarParts, SAFETY_CAR_COLOR } from "./carParts";
 import { simulateActors, type ActorEntry } from "./actors";
 import { useViewerStore } from "../state/store";
 import { trackHeading } from "./world";
+import { fitCarScales } from "./spacing";
 
 /**
  * All cars in one set of `InstancedMesh`es, one mesh per car part, plus a
@@ -86,6 +87,8 @@ function labelTexture(code: string, hex: string): THREE.CanvasTexture {
 
 export function CarFleet() {
   const parts = useMemo(() => buildCarParts(), []);
+  const sample = useRef({ frame: -1, time: 0, interval: 1 / 30 });
+  const displayScales = useRef(new Map<string, number>());
   const carScale = useViewerStore((state) => state.carScale);
   const showLabels = useViewerStore((state) => state.showLabels);
 
@@ -180,7 +183,26 @@ export function CarFleet() {
     }
 
     // Shared with CameraRig. Returned in the same order as `entries`.
-    const simulated = simulateActors(entries, origin, dt);
+    const now = state.clock.elapsedTime;
+    let reset = false;
+    if (store.frameIndex !== sample.current.frame) {
+      const gap = store.frameIndex - sample.current.frame;
+      reset = sample.current.frame >= 0 && (gap < 0 || gap > Math.max(15, store.speed * 15));
+      const elapsed = now - sample.current.time;
+      if (elapsed > 0) sample.current.interval = Math.min(.1, Math.max(1 / 120, elapsed));
+      sample.current.frame = store.frameIndex;
+      sample.current.time = now;
+    }
+    const simulated = simulateActors(entries, origin, dt, {
+      sampleInterval: sample.current.interval,
+      paused: store.paused,
+      reset,
+    });
+    const fittedScales = fitCarScales(simulated, carScale);
+    const activeKeys = new Set(simulated.map((actor) => actor.key));
+    for (const key of displayScales.current.keys()) {
+      if (!activeKeys.has(key)) displayScales.current.delete(key);
+    }
 
     const camera = state.camera as THREE.PerspectiveCamera;
     const tanHalfFov = Math.tan((camera.fov * Math.PI) / 360);
@@ -188,7 +210,11 @@ export function CarFleet() {
 
     for (let index = 0; index < simulated.length; index += 1) {
       const actor = simulated[index];
-      const worldScale = carScale * actor.scale;
+      const fitted = fittedScales[index];
+      const previous = displayScales.current.get(actor.key) ?? fitted;
+      // Shrink immediately to prevent intersection; restore size gradually.
+      const worldScale = reset ? fitted : Math.min(fitted, previous + (fitted - previous) * (1 - Math.exp(-3 * dt)));
+      displayScales.current.set(actor.key, worldScale);
 
       scratch.euler.set(0, actor.heading, 0);
       scratch.quaternion.setFromEuler(scratch.euler);
@@ -220,7 +246,7 @@ export function CarFleet() {
 
       scratch.world
         .copy(actor.position)
-        .setY(actor.scale * 2.6 * carScale);
+        .setY(Math.max(1.5, 2.6 * worldScale));
       sprite.position.copy(scratch.world);
 
       const distance = camera.position.distanceTo(scratch.world);
@@ -261,7 +287,7 @@ export function CarFleet() {
         material.needsUpdate = true;
       }
     }
-  });
+  }, -2);
 
   return <primitive object={group} />;
 }

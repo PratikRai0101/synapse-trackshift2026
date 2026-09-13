@@ -2,6 +2,8 @@ import { useMemo } from "react";
 import * as THREE from "three";
 import { useViewerStore } from "../state/store";
 import { buildStripGeometry, computeBounds, sceneX, sceneZ } from "./world";
+import { insetEdge } from "./trackDetails";
+import { drsZoneRanges } from "./cues";
 
 /**
  * The circuit surface: asphalt ribbon, alternating kerbs, ground plane and a
@@ -62,17 +64,14 @@ export function Track() {
       buildStripGeometry(iX, iY, oX, oY, origin, 0.0),
     );
 
-    // Kerbs hug each edge, spanning from the edge line toward the centreline.
-    // Track width in this data is a stylised ~200 m (real circuits are ~15 m),
-    // so these fractions are far wider in metres than a real kerb.
-    const kerbWidth = 0.075;
-    const lerp = (a: number[], b: number[], t: number) =>
-      a.map((value, index) => value + (b[index] - value) * t);
-
-    const innerKerbNearX = lerp(iX, x, kerbWidth);
-    const innerKerbNearY = lerp(iY, y, kerbWidth);
-    const outerKerbNearX = lerp(oX, x, kerbWidth);
-    const outerKerbNearY = lerp(oY, y, kerbWidth);
+    // Match the car's world-space scale, not a percentage of the stylized
+    // ribbon. This avoids gigantic kerbs on wide source geometry.
+    const { x: innerKerbNearX, y: innerKerbNearY } = insetEdge(iX, iY, x, y, .9);
+    const { x: outerKerbNearX, y: outerKerbNearY } = insetEdge(oX, oY, x, y, .9);
+    const innerPaint = insetEdge(innerKerbNearX, innerKerbNearY, x, y, .15);
+    const outerPaint = insetEdge(outerKerbNearX, outerKerbNearY, x, y, .15);
+    const innerLine = toGeometry(buildStripGeometry(innerKerbNearX, innerKerbNearY, innerPaint.x, innerPaint.y, origin, .025));
+    const outerLine = toGeometry(buildStripGeometry(outerKerbNearX, outerKerbNearY, outerPaint.x, outerPaint.y, origin, .025));
 
     const kerbColor = (station: number): [number, number, number] =>
       KERB_PALETTE[Math.floor(station / 8) % 2];
@@ -93,15 +92,38 @@ export function Track() {
       ? Math.hypot(oX[0] - iX[0], oY[0] - iY[0])
       : 200;
 
-    const line = new THREE.BoxGeometry(Math.max(trackWidth, 40), 0.08, 3.4);
+    const line = new THREE.BoxGeometry(trackWidth, 0.025, .4);
 
     const bounds = computeBounds(geometry);
+
+    // DRS splits, reusing the index ranges the 2D replay already computes. Drawn
+    // as a thin strip just inside the outer edge so they read as a track marking.
+    const drsZones = drsZoneRanges(geometry).map((zone) => {
+      const start = zone.start;
+      const end = Math.min(zone.end, outerX.length - 1);
+      const slice = (values: number[]) => values.slice(start, end + 1);
+      const outerSliceX = slice(oX);
+      const outerSliceY = slice(oY);
+      const { x: innerSliceX, y: innerSliceY } = insetEdge(
+        outerSliceX,
+        outerSliceY,
+        slice(x),
+        slice(y),
+        1.4,
+      );
+      return toGeometry(
+        buildStripGeometry(outerSliceX, outerSliceY, innerSliceX, innerSliceY, origin, 0.035),
+      );
+    });
 
     return {
       asphalt,
       innerKerb,
       outerKerb,
+      innerLine,
+      outerLine,
       line,
+      drsZones,
       linePosition: [
         sceneX(x[0], origin),
         0.03,
@@ -136,6 +158,19 @@ export function Track() {
         <meshStandardMaterial vertexColors roughness={0.7} metalness={0.02} />
       </mesh>
 
+      <mesh geometry={built.innerLine} receiveShadow renderOrder={3}>
+        <meshStandardMaterial color="#e2e1d9" roughness={.9} />
+      </mesh>
+      <mesh geometry={built.outerLine} receiveShadow renderOrder={3}>
+        <meshStandardMaterial color="#e2e1d9" roughness={.9} />
+      </mesh>
+
+      {built.drsZones.map((zone, index) => (
+        <mesh key={index} geometry={zone} renderOrder={4}>
+          <meshBasicMaterial color="#2fd46a" transparent opacity={0.5} />
+        </mesh>
+      ))}
+
       <mesh
         geometry={built.line}
         position={built.linePosition}
@@ -144,9 +179,7 @@ export function Track() {
       >
         <meshStandardMaterial
           color="#f2f4f7"
-          emissive="#f2f4f7"
-          emissiveIntensity={0.25}
-          roughness={0.5}
+          roughness={0.9}
         />
       </mesh>
 

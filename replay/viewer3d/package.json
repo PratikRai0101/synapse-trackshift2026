@@ -9,7 +9,7 @@
     "dev:web": "cd web && bun run dev",
     "mock": "bun run bridge/mock.ts",
     "shot": "bun run tools/screenshot.ts",
-    "test": "bun test tests",
+    "test": "bun test tests web/tests",
     "build": "cd web && bun run build",
     "typecheck": "bunx tsc --noEmit -p tsconfig.json && cd web && bun run typecheck"
   },

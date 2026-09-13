@@ -8,6 +8,7 @@ import { ToneMappingMode } from "postprocessing";
 import { Lighting } from "./Lighting";
 import { Track } from "./Track";
 import { CarFleet } from "./CarFleet";
+import { CarCues } from "./CarCues";
 import { CameraRig } from "./CameraRig";
 import { useViewerStore } from "../state/store";
 import { computeBounds } from "./world";
@@ -30,17 +31,18 @@ export function Scene() {
       <Lighting />
       <Track />
       <CarFleet />
+      <CarCues />
       <CameraRig />
 
       <EffectComposer>
         <Bloom
-          intensity={0.75}
-          luminanceThreshold={0.82}
+          intensity={0.2}
+          luminanceThreshold={1.1}
           luminanceSmoothing={0.25}
           mipmapBlur
         />
         <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
-        <Vignette offset={0.22} darkness={0.72} eskil={false} />
+        <Vignette offset={0.22} darkness={0.25} eskil={false} />
       </EffectComposer>
     </>
   );

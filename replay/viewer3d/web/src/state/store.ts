@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { ChaseView } from "../scene/chase";
 import type {
   DriverState,
   SafetyCarState,
@@ -60,8 +61,15 @@ interface ViewerState {
   paused: boolean;
   speed: number;
   cameraMode: CameraMode;
+  /** Strategy cues: DRS zones, focus ring, gap tether, focus strip. */
+  showCues: boolean;
+  /** Metres per lap; needed to turn lap fractions into gap distances. */
+  circuitLengthM: number;
+  toggleCues: () => void;
   /** Null keeps the chase camera on the live race leader. */
   followedDriver: string | null;
+  chaseView: ChaseView;
+  setChaseView: (view: ChaseView) => void;
   /**
    * Car size multiplier. A real car is ~5.6 m against a ~4 km circuit, i.e.
    * sub-pixel from the overview camera. Exaggerating the model is the 3D
@@ -93,7 +101,12 @@ export const useViewerStore = create<ViewerState>((set) => ({
   paused: false,
   speed: 1,
   cameraMode: "orbit",
+  showCues: true,
+  circuitLengthM: 0,
+  toggleCues: () => set((state) => ({ showCues: !state.showCues })),
   followedDriver: null,
+  chaseView: "chase",
+  setChaseView: (chaseView) => set({ chaseView, cameraMode: "follow" }),
   // Keep cars at physical scale by default. Enlarged cars overlap at normal
   // racing gaps and look as if they are colliding.
   carScale: 1,
@@ -118,6 +131,7 @@ export const useViewerStore = create<ViewerState>((set) => ({
         session: message.session_data,
         frameIndex: message.frame_index,
         totalFrames: message.total_frames,
+        circuitLengthM: message.circuit_length_m || state.circuitLengthM,
         paused: message.is_paused,
         speed: message.playback_speed,
       };
