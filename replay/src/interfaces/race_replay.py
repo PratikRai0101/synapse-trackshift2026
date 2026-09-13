@@ -262,6 +262,27 @@ class F1RaceReplayWindow(arcade.Window):
         # Broadcast initial telemetry state
         self._broadcast_telemetry_state()
 
+    def _drs_zone_ranges(self):
+        """Compact DRS zone index ranges for downstream consumers.
+
+        The 2D replay stores zones as ``{"start": {...}, "end": {...}}`` dicts
+        from the example lap. Only the index range is needed by the 3D viewer,
+        which already holds the outer edge polyline. Malformed or out-of-range
+        zones are dropped rather than raising during broadcast.
+        """
+        try:
+            zones = getattr(self, "drs_zones", None) or []
+            limit = len(self.x_outer)
+            ranges = []
+            for zone in zones:
+                start = int(zone["start"]["index"])
+                end = int(zone["end"]["index"])
+                if 0 <= start < limit and start < end:
+                    ranges.append({"start": start, "end": min(end, limit - 1)})
+            return ranges
+        except Exception:
+            return []
+
     def _broadcast_telemetry_state(self):
         """Broadcast current telemetry state to connected clients."""
         if not hasattr(self, 'telemetry_stream') or not self.telemetry_stream:
@@ -360,6 +381,10 @@ class F1RaceReplayWindow(arcade.Window):
                 "x_outer": self.x_outer.tolist(),
                 "y_outer": self.y_outer.tolist(),
                 "rotation_deg": self.circuit_rotation,
+                # Reuse the zones already computed for the 2D replay so the 3D
+                # viewer does not need its own DRS detection. Index ranges only:
+                # the viewer already has the outer edge polyline.
+                "drs_zones": self._drs_zone_ranges(),
             }
 
         # Send pre-computed data continuously. It's just a Python dictionary reference 
