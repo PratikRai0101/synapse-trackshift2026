@@ -2,10 +2,11 @@ import { useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { buildCarParts, SAFETY_CAR_COLOR } from "./carParts";
-import { simulateActors, type ActorEntry } from "./actors";
+import { getActor, simulateActors, type ActorEntry } from "./actors";
+import { playback } from "../net/playback";
 import { useViewerStore } from "../state/store";
 import { trackHeading } from "./world";
-import { fitCarScales } from "./spacing";
+import { detectOverlaps, fitCarScales } from "./spacing";
 import { drsOpening, tyreColour } from "./appearance";
 import { battleSet, orderCodes } from "./cues";
 
@@ -89,8 +90,7 @@ function labelTexture(code: string, hex: string): THREE.CanvasTexture {
 
 export function CarFleet() {
   const parts = useMemo(() => buildCarParts(), []);
-  const sample = useRef({ frame: -1, time: 0, interval: 1 / 30 });
-  const displayScales = useRef(new Map<string, number>());
+  const revision = useRef(-1);
   const drsStates = useRef(new Map<string, number>());
   const carScale = useViewerStore((state) => state.carScale);
   const showLabels = useViewerStore((state) => state.showLabels);
@@ -149,7 +149,9 @@ export function CarFleet() {
 
   useFrame((state, delta) => {
     const store = useViewerStore.getState();
-    const { origin, drivers } = store;
+    const { origin } = store;
+    const frame = playback.sample();
+    const drivers = frame?.drivers;
     group.visible = Boolean(origin && drivers);
     if (!origin || !drivers) return;
 
@@ -170,14 +172,13 @@ export function CarFleet() {
         x: driver.x,
         y: driver.y,
         scale: 1,
-        heading: store.geometry
-          ? trackHeading(driver.fraction, store.geometry)
-          : null,
+        heading: driver.heading ?? (!getActor(code) && store.geometry
+          ? trackHeading(driver.fraction, store.geometry) : null),
         color: cachedColor(store.driverColors[code] ?? "#9aa4b2"),
       });
     }
 
-    const sc = store.safetyCar;
+    const sc = frame?.safety_car;
     if (sc && Number.isFinite(sc.x) && Number.isFinite(sc.y) && sc.alpha > 0.02) {
       entries.push({
         key: "__SC",
@@ -190,26 +191,13 @@ export function CarFleet() {
 
     // Shared with CameraRig. Returned in the same order as `entries`.
     entries.splice(MAX_ACTORS);
-    const now = state.clock.elapsedTime;
-    let reset = false;
-    if (store.frameIndex !== sample.current.frame) {
-      const gap = store.frameIndex - sample.current.frame;
-      reset = sample.current.frame >= 0 && (gap < 0 || gap > Math.max(15, store.speed * 15));
-      const elapsed = now - sample.current.time;
-      if (elapsed > 0) sample.current.interval = Math.min(.1, Math.max(1 / 120, elapsed));
-      sample.current.frame = store.frameIndex;
-      sample.current.time = now;
-    }
-    const simulated = simulateActors(entries, origin, dt, {
-      sampleInterval: sample.current.interval,
-      paused: store.paused,
-      reset,
-    });
+    const reset = revision.current !== playback.revision;
+    revision.current = playback.revision;
+    const simulated = simulateActors(entries, origin, dt, { paused: store.paused, reset, direct: true });
     const fittedScales = fitCarScales(simulated, carScale);
+    const overlaps = detectOverlaps(simulated, carScale);
+    store.setRenderWarnings([...overlaps].sort(), Object.keys(drivers).filter((code) => drivers[code].motion_quality === "gap").sort());
     const activeKeys = new Set(simulated.map((actor) => actor.key));
-    for (const key of displayScales.current.keys()) {
-      if (!activeKeys.has(key)) displayScales.current.delete(key);
-    }
     for (const key of drsStates.current.keys()) {
       if (!activeKeys.has(key)) drsStates.current.delete(key);
     }
@@ -229,11 +217,7 @@ export function CarFleet() {
 
     for (let index = 0; index < simulated.length; index += 1) {
       const actor = simulated[index];
-      const fitted = fittedScales[index];
-      const previous = displayScales.current.get(actor.key) ?? fitted;
-      // Shrink immediately to prevent intersection; restore size gradually.
-      const worldScale = reset ? fitted : Math.min(fitted, previous + (fitted - previous) * (1 - Math.exp(-3 * dt)));
-      displayScales.current.set(actor.key, worldScale);
+      const worldScale = fittedScales[index];
 
       scratch.euler.set(0, actor.heading, 0);
       scratch.quaternion.setFromEuler(scratch.euler);
@@ -274,7 +258,13 @@ export function CarFleet() {
         group.add(sprite);
         labels.set(actor.key, sprite);
       }
-      const texture = labelTexture(actor.key, store.driverColors[actor.key] ?? (actor.key === "__SC" ? "#ffb020" : "#9aa4b2"));
+      const uncertain = overlaps.has(actor.key) || drivers[actor.key]?.motion_quality === "gap";
+      // Recorded pit status, not an inferred pit lane. Pit cars are tinted
+      // slate so they are distinguishable from cars on a flying lap.
+      const inPit = drivers[actor.key]?.in_pit === true;
+      const texture = labelTexture(uncertain ? `${actor.key}?` : inPit ? `${actor.key}·` : actor.key,
+        uncertain ? "#d69326" : inPit ? "#6b7280"
+          : store.driverColors[actor.key] ?? (actor.key === "__SC" ? "#ffb020" : "#9aa4b2"));
       if (sprite.material.map !== texture) {
         sprite.material.map = texture;
         sprite.material.needsUpdate = true;

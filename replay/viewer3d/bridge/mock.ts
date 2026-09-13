@@ -142,6 +142,11 @@ function makeFrame() {
   frameIndex += 1;
 
   return {
+    source_id: "viewer3d-mock",
+    coordinate_units: "m",
+    run_mode: "synthetic",
+    geometry_provenance: "Synthetic stadium development fixture",
+    motion_provenance: "Synthetic fixed-speed motion, not a vehicle simulation",
     frame_index: frameIndex,
     frame: {
       drivers,

@@ -1,10 +1,16 @@
 import type { Actor } from "./actors";
 
-/** Presentation scale only. Never alter telemetry positions or invent a pass. */
+/** Explicit user magnification only. Never hide overlap by shrinking a car. */
 export function fitCarScales(actors: readonly Actor[], requestedScale: number): number[] {
+  return actors.map((actor) => requestedScale * actor.scale);
+}
+
+/** Report oriented model intersections as uncertainty/contact, not a collision
+ * response. The simulator owns physical motion; recorded observations remain intact. */
+export function detectOverlaps(actors: readonly Actor[], requestedScale = 1): Set<string> {
   // Conservative oriented bounds enclose the complete car, including wings.
   const halfWidth = 1.15, halfLength = 3;
-  const scales = actors.map((actor) => requestedScale * actor.scale);
+  const overlaps = new Set<string>();
   const axes = actors.map((actor) => {
     const sin = Math.sin(actor.heading), cos = Math.cos(actor.heading);
     return [[sin, cos], [cos, -sin]];
@@ -26,13 +32,10 @@ export function fitCarScales(actors: readonly Actor[], requestedScale: number): 
         if (sum > 0) ratio = Math.max(ratio, Math.abs(dx * axis[0] + dz * axis[1]) / sum);
       }
       if (ratio < 1) {
-        const fit = ratio * .96;
-        scales[i] = Math.min(scales[i], requestedScale * actors[i].scale * fit);
-        scales[j] = Math.min(scales[j], requestedScale * actors[j].scale * fit);
+        overlaps.add(actors[i].key);
+        overlaps.add(actors[j].key);
       }
     }
   }
-  // Exact duplicate observations have no space for two physical meshes. Their
-  // labels remain visible; do not fabricate lateral position or collision force.
-  return scales;
+  return overlaps;
 }

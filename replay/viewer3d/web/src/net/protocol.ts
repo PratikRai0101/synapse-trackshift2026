@@ -20,6 +20,10 @@ export interface DriverState {
   rel_dist: number;
   position: number;
   fraction: number;
+  /** Source orientation in scene convention: atan2(vx, vy), radians. */
+  heading?: number;
+  in_pit?: boolean;
+  motion_quality?: "sampled" | "gap";
 }
 
 export interface WeatherState {
@@ -71,6 +75,12 @@ export interface SessionData {
 }
 
 export interface TelemetryMessage {
+  coordinate_units?: "m" | "dm";
+  source_id?: string;
+  run_mode?: "recorded" | "simulated" | "synthetic";
+  geometry_provenance?: string;
+  motion_provenance?: string;
+  simulation?: { command: string; ego_energy: number; gap_s: number; contact: boolean; model: string };
   frame_index: number;
   frame: Frame | null;
   track_status: string;

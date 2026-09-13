@@ -80,6 +80,8 @@ export interface FocusCue {
   aheadCode: string | null;
   behindCode: string | null;
   drs: boolean;
+  /** Recorded pit-window status; never inferred from geometry. */
+  inPit: boolean;
 }
 
 /** Focus-driver summary for the HUD strip. Null when the focus car is unknown. */
@@ -103,6 +105,7 @@ export function focusCue(
     aheadCode: ahead,
     behindCode: behind,
     drs: isDrsActive(self.drs),
+    inPit: drivers[code]?.in_pit === true,
   };
 }
 

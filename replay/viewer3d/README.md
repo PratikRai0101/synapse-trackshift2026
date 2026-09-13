@@ -81,26 +81,42 @@ Environment overrides: `TELEMETRY_PORT` (9999), `WS_PORT` (9998),
 | Leaderboard row | Follow that driver immediately |
 | `VIEW` | Chase, broadcast or overhead follow framing |
 | `CUES` | DRS zones, focus ring and gap tether (on by default) |
-| `SIZE` | Maximum car scale: 1x, 1.5x, 2x, 3x, 5x; auto-fitted to available space |
+| `SIZE` | Car scale: 1x, 1.5x, 2x, 3x, 5x (explicit magnification only) |
 | `LABELS` | Driver tags; follow mode limits them to the focus car and two cars either side |
 
-### Why cars are scaled up
+### Scale and units
 
-A real car is ~5.6 m long; the circuit data here is a stylised ~200 m wide
-ribbon spanning several kilometres, so a true-scale car is sub-pixel from the
-default camera. The magnifier is the 3D equivalent of the 2D replay drawing
-6 px circles. The default maximum is 1x; raise it for detail.
+FastF1 stores `X`/`Y` in **decimetres** while `Distance` is metres. The viewer
+normalizes coordinates once at the wire boundary (`net/coordinates.ts`) and
+then works in metres, so car size, track width and gap math share one unit.
+A payload that does not declare `coordinate_units` is left untouched and the
+HUD reports `UNNORMALIZED`. This conversion is why cars no longer disagree with
+the ribbon they drive on.
 
-Oriented car bounds automatically limit each model's size when cars get close,
-including side-by-side cars. Size is restored gradually as space opens up.
-This is a presentation adjustment, **not collision physics**: telemetry positions,
-order and gaps are never changed. When telemetry supplies identical coordinates,
-there is no room for either mesh; both reduce to zero size, with driver labels
-still available when LABELS is enabled. Small models can therefore indicate
-crowded or ambiguous telemetry, not actual smaller vehicles.
+Cars render at real size by default. A real car is ~5.6 m long and the circuit
+ribbon is a stylised ~20 m wide centreline offset, so from the overview camera a
+true-scale car is sub-pixel. `SIZE` is explicit user magnification, the 3D
+equivalent of the 2D replay's 6 px circles.
+
+### Overlapping samples are shown, not hidden
+
+The viewer **does not shrink cars to avoid overlap**. When recorded positions
+intersect, the overlap is real input, so it is displayed and reported:
+
+- both cars keep full size, because silently shrinking them was a visual
+  workaround that made ordered telemetry look like a physical collision;
+- the HUD shows `AMBIGUOUS` with the affected codes;
+- their labels gain a `?` and an amber tint;
+- no lateral offset, collision force or position is invented.
+
+A simulator, not the viewer, owns collision. When a `replay_ai` branch is
+streamed, its contact decision arrives in `simulation.contact` and is displayed
+as `CONTACT MODELLED`.
 
 Labels are sized from camera distance every frame, so they stay a constant
-number of screen pixels at any zoom.
+number of screen pixels at any zoom. Recorded pit status (`in_pit`) tints a
+label slate and adds `PIT` to the cue strip; the viewer does not infer a pit
+lane.
 
 ## Dev tooling
 
@@ -155,8 +171,50 @@ The **CAM** button in the HUD toggles between:
 - Cars use eight instanced material/animation batches for the whole field; the
   independently moving flap adds one draw beyond the seven static batches.
 
-This pass does not recalibrate telemetry units, reconstruct track widths,
-add elevation, or remove the existing auto-fit size workaround.
+This pass does not reconstruct surveyed track widths or add elevation.
+
+These are the **remaining** realism gaps, tracked so they are not mistaken for
+done:
+
+- no surveyed track width, runoff, barriers or elevation;
+- no wheel rotation, steering angle or brake glow (only DRS is animated);
+- no camera distance/height control beyond the three presets.
+
+## Simulation mode
+
+The viewer renders a `replay_ai` branch without knowing what a branch is. It
+only reads the wire contract, so the same scene code draws a recorded race and
+an evaluated counterfactual:
+
+```
+replay_ai closed-loop plant                       (owns motion + decision)
+        ↓  scripts/simulate_stream.py             (same JSON schema)
+bridge (:9999 TCP -> :9998 WS)                    (unchanged)
+        ↓
+viewer3d                                          (owns presentation only)
+```
+
+```bash
+# terminal 1: a simulated branch (forced action, or omit for the reference)
+cd replay_ai && .venv/bin/python scripts/simulate_stream.py --action BURN
+# terminal 2: bridge + viewer
+cd replay/viewer3d && bun run dev
+```
+
+Either the Python stream server or a dependency-free fallback socket serves the
+payload, so this works headless.
+
+What the viewer does with it:
+
+- `run_mode` drives a colour-coded banner: `RECORDED REPLAY`, `SIMULATED
+  BRANCH` or `SYNTHETIC SOURCE`. A simulated branch must never look like the
+  recorded race.
+- `simulation.command`, `gap_s`, `ego_energy` and `contact` are shown, using the
+  simulator's own numbers rather than recomputed ones.
+- `motion_provenance` and `geometry_provenance` are attached to the
+  `PROVENANCE` tooltip so a synthetic display loop cannot be mistaken for a
+  surveyed circuit.
+- the hidden rival mode used for evaluation is never published.
 
 ## Swapping in a real car model
 
@@ -171,14 +229,20 @@ team/tyre tinting, the DRS hinge and instancing. See
 
 ## Data the viewer depends on
 
-The JSON payload from `_broadcast_telemetry_state()` is the only contract:
+The JSON payload from `_broadcast_telemetry_state()` is the only contract.
+Optional fields are all provenance or mode markers; a payload without them
+still renders, just without the banner.
 
-- `frame.drivers[CODE]` — `x`, `y`, `speed`, `gear`, `drs`, `throttle`,
-  `brake`, `tyre`, `lap`, `position`, `fraction`
+- `frame.drivers[CODE]` — `x`, `y` (decimetres), `speed`, `gear`, `drs`,
+  `throttle`, `brake`, `tyre`, `lap`, `position`, `fraction`, and optional
+  `heading`, `in_pit`, `motion_quality`
 - `frame.safety_car` — `x`, `y`, `phase`, `alpha`
 - `driver_colors` — `CODE -> "#RRGGBB"`
 - `track_geometry` — centreline plus `inner`/`outer` edges, and `drs_zones`
   (`{start, end}` index ranges into the outer edge, reused from the 2D replay)
+- `source_id`, `coordinate_units`, `run_mode` — mode and unit markers, so a new
+  source resets retained state instead of splicing two sessions together
+- `geometry_provenance`, `motion_provenance`, `simulation` — shown in the banner
 - `session_data`, `track_status`, `playback_speed`, `is_paused`
 
 ## Known limits
@@ -187,9 +251,21 @@ The JSON payload from `_broadcast_telemetry_state()` is the only contract:
   is flat.
 - **Heading follows observed motion**, with time-based angular smoothing and a
   small noise threshold. The track tangent initializes stationary/new cars.
-- **Playback is interpolation, not a physics simulation.** Cars reach their
-  latest sample in a bounded interval, stop exactly when paused, and reset on
-  detected seeks rather than accelerating or driving backwards to old positions.
+- **Playback is a shared clock, not a physics simulation.** One display clock
+  (100 ms behind the source, rate-limit corrected) samples recorded positions
+  with monotone cubic interpolation, so motion no longer depends on packet
+  arrival timing. Gaps longer than 0.5 s or faster than the reported speed
+  allows are marked `motion_quality: "gap"` rather than bridged with an
+  invented trajectory.
+- **No steering model.** The viewer never invents lateral motion; recorded cars
+  follow recorded positions and headings only.
+- **`replay_ai`'s drag constant is uncalibrated.** `PlantConfig.drag_accel` is a
+  placeholder, so simulated cars coast unrealistically slowly. It is left
+  unchanged on purpose: retuning a physical constant invalidates frozen
+  benchmark numbers, so it must be a separate, explicit change.
+- **Streamed branches are longitudinal only.** `simulate_stream.py` projects
+  plant distance onto a synthetic display loop. It does not model steering,
+  a racing line or a pit lane.
 - **High playback speeds** (64x+) make cars jump large distances per tick; jumps
   beyond 250 m are applied instantly rather than interpolated.
 - **Race sessions only.** `run_qualifying_replay` never starts the telemetry

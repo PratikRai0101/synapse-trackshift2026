@@ -1,4 +1,6 @@
 import { create } from "zustand";
+import { toMetres } from "../net/coordinates";
+import { playback } from "../net/playback";
 import type { ChaseView } from "../scene/chase";
 import type {
   DriverState,
@@ -47,6 +49,15 @@ function computeOrigin(geometry: TrackGeometry): WorldOrigin {
 
 interface ViewerState {
   connected: boolean;
+  sourceId: string | null;
+  coordinateUnits: "m" | "dm" | null;
+  runMode: "recorded" | "simulated" | "synthetic" | "unknown";
+  geometryProvenance: string;
+  motionProvenance: string;
+  simulation: TelemetryMessage["simulation"] | null;
+  overlapCodes: string[];
+  gapCodes: string[];
+  setRenderWarnings: (overlaps: string[], gaps: string[]) => void;
   hasData: boolean;
   geometry: TrackGeometry | null;
   origin: WorldOrigin | null;
@@ -87,6 +98,17 @@ interface ViewerState {
 
 export const useViewerStore = create<ViewerState>((set) => ({
   connected: false,
+  sourceId: null,
+  coordinateUnits: null,
+  runMode: "unknown",
+  geometryProvenance: "Unspecified track geometry",
+  motionProvenance: "Unspecified motion source",
+  simulation: null,
+  overlapCodes: [],
+  gapCodes: [],
+  setRenderWarnings: (overlapCodes, gapCodes) => set((state) =>
+    state.overlapCodes.join() === overlapCodes.join() && state.gapCodes.join() === gapCodes.join()
+      ? state : { overlapCodes, gapCodes }),
   hasData: false,
   geometry: null,
   origin: null,
@@ -119,9 +141,21 @@ export const useViewerStore = create<ViewerState>((set) => ({
   setCarScale: (carScale) => set({ carScale }),
   toggleLabels: () => set((state) => ({ showLabels: !state.showLabels })),
 
-  apply: (message) =>
+  apply: (raw) =>
     set((state) => {
+      const sourceId = raw.source_id ?? "legacy";
+      const coordinateUnits = raw.coordinate_units ?? null;
+      const changed = sourceId !== state.sourceId || coordinateUnits !== state.coordinateUnits;
+      const message = toMetres({ ...raw,
+        track_geometry: changed || !state.geometry ? raw.track_geometry : undefined });
+      playback.push(message);
       const next: Partial<ViewerState> = {
+        sourceId, coordinateUnits,
+        runMode: message.run_mode ?? "unknown",
+        geometryProvenance: message.geometry_provenance ?? "Unspecified track geometry",
+        motionProvenance: message.motion_provenance ?? "Unspecified motion source",
+        simulation: message.simulation ?? null,
+        ...(changed ? { geometry: null, origin: null, overlapCodes: [], gapCodes: [], driverColors: {} } : {}),
         hasData: true,
         drivers: message.frame?.drivers ?? null,
         safetyCar: message.frame?.safety_car ?? null,
@@ -131,7 +165,7 @@ export const useViewerStore = create<ViewerState>((set) => ({
         session: message.session_data,
         frameIndex: message.frame_index,
         totalFrames: message.total_frames,
-        circuitLengthM: message.circuit_length_m || state.circuitLengthM,
+        circuitLengthM: message.circuit_length_m || (changed ? 0 : state.circuitLengthM),
         paused: message.is_paused,
         speed: message.playback_speed,
       };
@@ -145,7 +179,7 @@ export const useViewerStore = create<ViewerState>((set) => ({
 
       // Geometry is retained by the bridge and arrives once; capture the origin
       // at the same moment so track and cars share one coordinate frame.
-      if (message.track_geometry && !state.geometry) {
+      if (message.track_geometry && (changed || !state.geometry)) {
         next.geometry = message.track_geometry;
         next.origin = computeOrigin(message.track_geometry);
       }
