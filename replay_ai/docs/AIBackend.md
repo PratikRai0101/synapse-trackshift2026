@@ -163,6 +163,60 @@ by its synthetic generator. It does not establish the same separation on an
 unlabelled real car. The modest four-way score also means `H` versus `M` must be
 shown as uncertainty, not presented as a reliable classification.
 
+## Latency budget
+
+Measure every architecture block independently:
+
+```sh
+.venv/bin/python scripts/benchmark_latency.py \
+  --iterations 200 --output artifacts/latency.json
+```
+
+Reference measurement on an Apple Silicon arm64 host, CPython 3.14.6, pure
+Python with NumPy/SciPy LP (no JIT, no native solver):
+
+| block | design budget | p50 | p95 | p99 |
+|---|---:|---:|---:|---:|
+| telemetry feature deltas | per frame | 0.003 ms | 0.004 ms | 0.004 ms |
+| 40-state HMM update | per observation | 0.20 ms | 0.21 ms | 0.21 ms |
+| Level 4 season DP | per weekend | 0.014 ms | 0.015 ms | 0.075 ms |
+| Level 3 lap DP | per lap | 3.64 ms | 3.68 ms | 3.68 ms |
+| Level 2 full (heuristic + POMCP + SOCP) | < 1000 ms | 3.26 ms | 3.51 ms | 10.86 ms |
+| — Level 2 heuristic only | | 0.018 ms | 0.019 ms | 0.020 ms |
+| — particle POMCP search | | 3.60 ms | 3.73 ms | 4.02 ms |
+| — spatial SOCP profile | | 0.022 ms | 0.023 ms | 0.028 ms |
+| Level 1 actuator MPC | 10 ms tick | 0.74 ms | 0.85 ms | 1.01 ms |
+| vehicle plant step (10 ms) | per tick | 0.003 ms | 0.003 ms | 0.003 ms |
+| end-to-end observation | | 4.12 ms | 4.22 ms | 4.29 ms |
+| closed-loop control step | | 4.95 ms | 5.47 ms | 6.04 ms |
+| counterfactual fork (C) | interactive | 218 ms | 221 ms | 221 ms |
+
+Particle search dominates tactical latency. The SOCP projection and the
+heuristic scorer are effectively free by comparison. Cost scales close to
+linearly with the simulation budget:
+
+| simulations | particles | p50 |
+|---:|---:|---:|
+| 64 | 32 | 0.56 ms |
+| 128 | 64 | 1.26 ms |
+| 256 | 128 | 3.25 ms |
+| 512 | 256 | 6.99 ms |
+
+### Consequences to keep in mind
+
+- **Level 1 meets its 10 ms tick** with ~7% utilisation; the whole closed-loop
+  step uses about half the tick.
+- **Level 2 is roughly 300x under its 1 s sector budget**, so search fidelity can
+  be raised substantially before latency matters.
+- **The counterfactual fork is synchronous.** 218 ms of main-thread work is a
+  perceptible hitch. It belongs in a worker thread before this is shown live.
+- **High playback rates are the real constraint.** The replay computes
+  intelligence once per distinct `frame_index`, so cost per rendered frame
+  scales with playback speed: about 25% of a 60 FPS budget at 1x, 50% at 2x and
+  ~99% at 4x. The 4x setting will drop frames with the full stack enabled.
+- These numbers are this host, this Python, and these reference solvers. A
+  trained neural lap map or a compiled SOCP backend would change them.
+
 ## Paired benchmark matrix
 
 Run the multi-seed comparison with identical initial conditions:
