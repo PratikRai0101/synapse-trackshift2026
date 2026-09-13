@@ -283,6 +283,27 @@ class F1RaceReplayWindow(arcade.Window):
         except Exception:
             return []
 
+    def _ribbon_width(self):
+        """Measured width of the schematic ribbon, in source coordinates.
+
+        The 2D replay builds the track as a constant normal offset from the
+        centreline, so this is a declared property of the geometry being sent,
+        not a surveyed circuit width. Consumers derive markings from it instead
+        of hard-coding a metre value that could drift from the data.
+        """
+        cached = getattr(self, "_viewer_ribbon_width", None)
+        if cached is not None:
+            return cached
+        try:
+            import numpy as np
+            dx = np.asarray(self.x_outer, dtype=float) - np.asarray(self.x_inner, dtype=float)
+            dy = np.asarray(self.y_outer, dtype=float) - np.asarray(self.y_inner, dtype=float)
+            width = float(np.median(np.hypot(dx, dy)))
+        except Exception:
+            width = 200.0  # build_track_from_example_lap default, in decimetres
+        self._viewer_ribbon_width = width
+        return width
+
     def _broadcast_telemetry_state(self):
         """Broadcast current telemetry state to connected clients."""
         if not hasattr(self, 'telemetry_stream') or not self.telemetry_stream:
@@ -389,6 +410,10 @@ class F1RaceReplayWindow(arcade.Window):
                 "x_outer": self.x_outer.tolist(),
                 "y_outer": self.y_outer.tolist(),
                 "rotation_deg": self.circuit_rotation,
+                # Declared so consumers can size kerbs, run-off and markings
+                # from the data rather than a duplicated constant.
+                "track_width": self._ribbon_width(),
+                "track_width_kind": "schematic_constant_offset",
                 # Reuse the zones already computed for the 2D replay so the 3D
                 # viewer does not need its own DRS detection. Index ranges only:
                 # the viewer already has the outer edge polyline.
