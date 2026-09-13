@@ -65,9 +65,24 @@ class ZoneMPC:
 
     def solve(self, speed_kmh: float, energy: float, target_speed_kmh: float,
               target_energy: float | None = None,
-              battery_temperature: float | None = None) -> ZoneMPCResult:
+              battery_temperature: float | None = None,
+              power_bounds: tuple[float, float] = (0.0, 1.0),
+              elapsed_s: float | None = None) -> ZoneMPCResult:
+        """Solve the horizon LP.
+
+        ``power_bounds`` carries the Level 2 tactical intent (BURN deploys,
+        HARVEST does not) into execution. The MPC still owns feasibility.
+
+        ``elapsed_s`` is the model time since the previous solve. Rate limits
+        are applied over that interval for the first step, because the actuator
+        has had the whole interval to move. Using only the internal step for
+        that bound understated reachable actuation by an order of magnitude and
+        made a legitimate deployment request look infeasible.
+        """
         cfg = self.config
         n = max(1, int(cfg.horizon))
+        # Model time available to the actuator since the previous solve.
+        elapsed = max(0.0, float(cfg.dt_s if elapsed_s is None else elapsed_s))
         channels = 3  # power, friction brake, regeneration
         variables = channels * n
         power, brake, regen = 0, 1, 2
@@ -121,8 +136,10 @@ class ZoneMPC:
                 lower[channel * n + step] = -1.0
                 prior = previous if step == 0 else None
                 if prior is not None:
+                    # First step may use the whole interval since the last solve.
+                    reach = rate * (elapsed if step == 0 else cfg.dt_s)
                     A.extend((upper, lower))
-                    b.extend((prior + rate * cfg.dt_s, -prior + rate * cfg.dt_s))
+                    b.extend((prior + reach, -prior + reach))
                 else:
                     # Difference against the previous horizon variable.
                     upper[channel * n + step] = 1.0
@@ -141,7 +158,21 @@ class ZoneMPC:
         A.append(thermal_row)
         b.append(cfg.max_battery_temperature - start_temperature)
 
-        bounds = ([(0.0, 1.0)] * n + [(0.0, 1.0)] * n +
+        # Model time available to the actuator since the previous solve.
+        requested_floor = max(0.0, min(1.0, float(power_bounds[0])))
+        requested_ceiling = max(0.0, min(1.0, float(power_bounds[1])))
+        reachable = self.previous_power + cfg.max_power_rate_per_s * elapsed
+        power_floor = min(requested_floor, max(0.0, reachable))
+        if float(target_speed_kmh) <= float(speed_kmh):
+            # Decelerating zone: deployment is only feasible if the friction
+            # brake can cancel it within this interval. Without this clamp a
+            # legitimate-looking floor makes the LP infeasible and the caller
+            # silently receives zero power instead of a bounded one.
+            brake_reach = self.previous_brake + cfg.max_brake_rate_per_s * elapsed
+            power_floor = min(power_floor,
+                              brake_reach * cfg.brake_accel / max(cfg.accel_per_power, 1e-9))
+        power_ceiling = max(power_floor, requested_ceiling)
+        bounds = ([(power_floor, power_ceiling)] * n + [(0.0, 1.0)] * n +
                   [(0.0, min(1.0, cfg.max_regen_fraction))] * n)
         result = linprog(c, A_ub=np.asarray(A), b_ub=np.asarray(b), bounds=bounds,
                          method="highs")
