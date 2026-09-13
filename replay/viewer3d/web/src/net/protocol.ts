@@ -58,6 +58,8 @@ export interface TrackGeometry {
   x_outer: number[];
   y_outer: number[];
   rotation_deg: number;
+  /** Index ranges into the outer edge. Reused from the 2D replay's zones. */
+  drs_zones?: { start: number; end: number }[];
 }
 
 export interface SessionData {

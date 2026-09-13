@@ -75,6 +75,11 @@ function buildGeometry() {
     x_outer: xOuter,
     y_outer: yOuter,
     rotation_deg: 0,
+    // Two synthetic DRS zones so the viewer's cue layer has something to draw.
+    drs_zones: [
+      { start: Math.floor(POINTS * 0.05), end: Math.floor(POINTS * 0.2) },
+      { start: Math.floor(POINTS * 0.6), end: Math.floor(POINTS * 0.72) },
+    ],
   };
 }
 

@@ -1,4 +1,5 @@
 import { useViewerStore } from "../state/store";
+import { focusCue } from "../scene/cues";
 
 const TYRE_LABEL: Record<number, string> = {
   1: "S",
@@ -43,6 +44,16 @@ export function Hud() {
   const setCameraMode = useViewerStore((state) => state.setCameraMode);
   const followedDriver = useViewerStore((state) => state.followedDriver);
   const setFollowedDriver = useViewerStore((state) => state.setFollowedDriver);
+  const chaseView = useViewerStore((state) => state.chaseView);
+  const setChaseView = useViewerStore((state) => state.setChaseView);
+  const showCues = useViewerStore((state) => state.showCues);
+  const toggleCues = useViewerStore((state) => state.toggleCues);
+  const circuitLengthM = useViewerStore((state) => state.circuitLengthM);
+
+  const cue = drivers ? focusCue(drivers, followedDriver, circuitLengthM) : null;
+
+  const gapText = (value: number | null) =>
+    value == null ? "—" : `+${value.toFixed(1)}s`;
   const carScale = useViewerStore((state) => state.carScale);
   const setCarScale = useViewerStore((state) => state.setCarScale);
   const showLabels = useViewerStore((state) => state.showLabels);
@@ -91,6 +102,16 @@ export function Hud() {
         >
           FOLLOW: {followedDriver ?? "LEADER"}
         </button>
+        <label className="hud__view">
+          VIEW
+          <select aria-label="Follow camera view" className="hud__button"
+            value={chaseView}
+            onChange={(event) => setChaseView(event.target.value as typeof chaseView)}>
+            <option value="chase">CHASE</option>
+            <option value="broadcast">BROADCAST</option>
+            <option value="overhead">OVERHEAD</option>
+          </select>
+        </label>
         <button
           className="hud__button"
           type="button"
@@ -100,7 +121,15 @@ export function Hud() {
             setCarScale(next ?? 1);
           }}
         >
-          SIZE: {carScale}x
+          SIZE: ≤{carScale}x
+        </button>
+        <button
+          className={`hud__button ${showCues ? "hud__button--on" : ""}`}
+          type="button"
+          title="DRS zones, focus ring and gap tether"
+          onClick={toggleCues}
+        >
+          CUES
         </button>
         <button
           className={`hud__button ${showLabels ? "hud__button--on" : ""}`}
@@ -110,6 +139,20 @@ export function Hud() {
           LABELS
         </button>
       </header>
+
+      {showCues && cue && (
+        <div className="cues">
+          <span className="cues__code">{cue.code}</span>
+          <span className="cues__item">P{cue.position}</span>
+          <span className="cues__item" title="Gap to the car ahead">
+            AHEAD {gapText(cue.gapAheadS)}
+          </span>
+          <span className="cues__item" title="Gap to the car behind">
+            BEHIND {gapText(cue.gapBehindS)}
+          </span>
+          {cue.drs && <span className="cues__flag">DRS</span>}
+        </div>
+      )}
 
       {leaderboard.length > 0 && (
         <aside className="hud__board">

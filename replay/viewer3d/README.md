@@ -79,7 +79,9 @@ Environment overrides: `TELEMETRY_PORT` (9999), `WS_PORT` (9998),
 | `CAM` | Toggle `ORBIT` (free orbit over the circuit) / `FOLLOW` (chase camera) |
 | `FOLLOW` | Show the chase target; click it to return to the live leader |
 | Leaderboard row | Follow that driver immediately |
-| `SIZE` | Car scale: 1x, 1.5x, 2x, 3x, 5x |
+| `VIEW` | Chase, broadcast or overhead follow framing |
+| `CUES` | DRS zones, focus ring and gap tether (on by default) |
+| `SIZE` | Maximum car scale: 1x, 1.5x, 2x, 3x, 5x; auto-fitted to available space |
 | `LABELS` | Driver code tags above each car |
 
 ### Why cars are scaled up
@@ -87,7 +89,15 @@ Environment overrides: `TELEMETRY_PORT` (9999), `WS_PORT` (9998),
 A real car is ~5.6 m long; the circuit data here is a stylised ~200 m wide
 ribbon spanning several kilometres, so a true-scale car is sub-pixel from the
 default camera. The magnifier is the 3D equivalent of the 2D replay drawing
-6 px circles. Drop it to 1x for a literal view, raise it for detail.
+6 px circles. The default maximum is 1x; raise it for detail.
+
+Oriented car bounds automatically limit each model's size when cars get close,
+including side-by-side cars. Size is restored gradually as space opens up.
+This is a presentation adjustment, **not collision physics**: telemetry positions,
+order and gaps are never changed. When telemetry supplies identical coordinates,
+there is no room for either mesh; both reduce to zero size, with driver labels
+still available when LABELS is enabled. Small models can therefore indicate
+crowded or ambiguous telemetry, not actual smaller vehicles.
 
 Labels are sized from camera distance every frame, so they stay a constant
 number of screen pixels at any zoom.
@@ -99,6 +109,28 @@ follow captures to `.shots/`. It uses a locally installed Chromium-family
 browser; override with `BROWSER_PATH=/path/to/browser bun run shot`. This is how
 the scene was tuned — screenshots beat guessing when the feedback loop is a
 renderer.
+
+## Strategy cues
+
+The viewer does not re-implement strategy. Cues are derived from the same public
+telemetry the 2D replay uses, with the replay's own rules copied deliberately so
+the two cannot disagree:
+
+| Cue | Source |
+|---|---|
+| DRS zone markings on track | `drs_zones` index ranges, computed by the 2D replay |
+| Focus ring under the followed car | selection; green when that car's DRS is open |
+| Gap tether to the car ahead | `gap_between` math, drawn only within the connector window |
+| `AHEAD` / `BEHIND` strip | focus-driver gaps, position and DRS |
+
+Rules mirrored from `replay/src/interfaces/race_replay.py`: `gap_between`
+(distance / 55.56 m/s), `_battle_set` (focus car +- `focus_radius` = 2) and
+`MAX_CONNECTOR_SECONDS` = 3. `isDrsActive` mirrors the `8/10/12/14` overlay
+codes.
+
+All of it is a **rendering of public evidence**, not battery state. The replay's
+energy and overtake outputs are belief estimates; show those on the focus strip
+only from a real backend payload rather than recomputing them here.
 
 ## Camera
 
@@ -127,22 +159,26 @@ The JSON payload from `_broadcast_telemetry_state()` is the only contract:
   `brake`, `tyre`, `lap`, `position`, `fraction`
 - `frame.safety_car` — `x`, `y`, `phase`, `alpha`
 - `driver_colors` — `CODE -> "#RRGGBB"`
-- `track_geometry` — centreline plus `inner`/`outer` edges
+- `track_geometry` — centreline plus `inner`/`outer` edges, and `drs_zones`
+  (`{start, end}` index ranges into the outer edge, reused from the 2D replay)
 - `session_data`, `track_status`, `playback_speed`, `is_paused`
 
 ## Known limits
 
 - **No elevation.** FastF1 telemetry carries no reliable height, so the circuit
   is flat.
-- **Heading uses the track tangent** when lap fraction and geometry are
-  available, with a smoothed position-delta fallback for incomplete telemetry.
+- **Heading follows observed motion**, with time-based angular smoothing and a
+  small noise threshold. The track tangent initializes stationary/new cars.
+- **Playback is interpolation, not a physics simulation.** Cars reach their
+  latest sample in a bounded interval, stop exactly when paused, and reset on
+  detected seeks rather than accelerating or driving backwards to old positions.
 - **High playback speeds** (64x+) make cars jump large distances per tick; jumps
   beyond 250 m are applied instantly rather than interpolated.
 - **Race sessions only.** `run_qualifying_replay` never starts the telemetry
   server, so there is nothing to consume for qualifying.
-- **Bunched packs can overlap at enlarged car scales**, since those models are
-  intentionally larger than real racing gaps. The default 1x scale preserves
-  physical spacing.
+- **Sparse telemetry** can still draw straight segments across a corner. The
+  viewer does not invent missing racing lines or treat recorded overlaps as
+  evidence of a real collision.
 
 ## Troubleshooting the renderer
 
@@ -159,22 +195,10 @@ and a large `far` plane the ground punches through the track, which presents as
 the circuit partially disappearing at orbit distance. Do not remove it from the
 Canvas `gl` props, and keep `near` well above 1.
 
-**Chase-camera heading comes from the track, not the car.** The follow camera
-takes its direction of travel from the centreline tangent at the followed car's
-`fraction` (`trackHeading()` in `scene/world.ts`), falling back to the car's own
-smoothed yaw only when `fraction` is unavailable.
+**The chase camera reads the rendered actor.** Fleet updates run before the
+camera. Both eye and look target share the actor's translation; heading and
+view offsets are smoothed in car-relative space, avoiding independent world-space
+lags. This also allows pit-lane motion to differ from the circuit centreline.
 
-Do not reintroduce a heading derived from a single position delta. Position
-deltas are dominated by floating-point noise, especially at low speed, and the
-follow camera sits tens of metres behind the car — a few degrees of heading
-noise becomes metres of lateral camera movement per frame. Measured heading
-"jerk" (mean absolute second difference, sampled in headless Chromium at ~9 fps):
-
-| Source | Jerk |
-|---|---|
-| Raw single-frame delta (original behaviour) | 0.296° |
-| Smoothed velocity vector | 0.024° |
-| **Track tangent (current camera)** | **0.027°** |
-
-Roughly an 11x reduction against the original. `tools/screenshot.ts` captures
-stills, but wobble needs the metric above, not a screenshot.
+Run `bun run test` for motion, pause/seek, frame-rate, spacing, model bounds and
+camera-framing regressions. These are numerical checks, not visual validation.

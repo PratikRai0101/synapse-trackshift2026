@@ -44,6 +44,7 @@ canvas {
   pointer-events: auto;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 14px;
   padding: 9px 14px;
   border: 1px solid var(--edge);
@@ -52,6 +53,16 @@ canvas {
   backdrop-filter: blur(14px);
   font-size: 12px;
   letter-spacing: 0.06em;
+}
+
+.hud__view {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hud__view option {
+  background: #101722;
 }
 
 .hud__title {
@@ -121,6 +132,34 @@ canvas {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.cues {
+  pointer-events: auto;
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  background: var(--panel);
+  backdrop-filter: blur(14px);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+}
+
+.cues__code {
+  font-weight: 700;
+}
+
+.cues__item {
+  color: var(--muted);
+}
+
+.cues__flag {
+  color: #4ade80;
+  font-weight: 700;
 }
 
 .row {

@@ -1,4 +1,8 @@
 import { Environment, Lightformer } from "@react-three/drei";
+import { useRef } from "react";
+import { useFrame } from "@react-three/fiber";
+import * as THREE from "three";
+import { getActor } from "./actors";
 import { useViewerStore } from "../state/store";
 import { computeBounds } from "./world";
 
@@ -12,6 +16,24 @@ import { computeBounds } from "./world";
 export function Lighting() {
   const geometry = useViewerStore((state) => state.geometry);
   const extent = geometry ? computeBounds(geometry).radius * 1.2 : 1500;
+  const mode = useViewerStore((state) => state.cameraMode);
+  const scale = useViewerStore((state) => state.carScale);
+  const sun = useRef<THREE.DirectionalLight>(null);
+  // A circuit-wide shadow map cannot resolve a tyre-sized contact shadow.
+  const shadowExtent = mode === "follow" ? 45 * scale : extent;
+  useFrame(() => {
+    const light = sun.current;
+    if (!light) return;
+    const { drivers, followedDriver } = useViewerStore.getState();
+    const code = followedDriver && drivers?.[followedDriver] ? followedDriver :
+      Object.entries(drivers ?? {}).find(([, driver]) => driver.position === 1)?.[0];
+    const actor = mode === "follow" && code ? getActor(code) : undefined;
+    if (actor) light.target.position.copy(actor.position);
+    else light.target.position.set(0, 0, 0);
+    light.target.updateMatrixWorld();
+    light.shadow.camera.updateProjectionMatrix();
+    light.position.set(extent * .6, extent * 1.1, extent * .4).add(light.target.position);
+  });
 
   return (
     <>
@@ -19,18 +41,20 @@ export function Lighting() {
       <hemisphereLight args={["#9dc0ff", "#24352a", 1.1]} />
 
       <directionalLight
+        ref={sun}
         castShadow
         position={[extent * 0.6, extent * 1.1, extent * 0.4]}
         intensity={2.8}
         color="#fff4e0"
         shadow-mapSize={[2048, 2048]}
-        shadow-bias={-0.0006}
+        shadow-bias={-0.00001}
+        shadow-normalBias={0.025}
         shadow-camera-near={1}
         shadow-camera-far={extent * 4}
-        shadow-camera-left={-extent}
-        shadow-camera-right={extent}
-        shadow-camera-top={extent}
-        shadow-camera-bottom={-extent}
+        shadow-camera-left={-shadowExtent}
+        shadow-camera-right={shadowExtent}
+        shadow-camera-top={shadowExtent}
+        shadow-camera-bottom={-shadowExtent}
       />
 
       {/* Fill from the opposite side so bodywork never goes fully black. */}
