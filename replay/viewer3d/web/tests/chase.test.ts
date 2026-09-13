@@ -35,13 +35,15 @@ test("heading wrap uses short rotation and reset immediately reframes", () => {
   expect(rig.position.toArray()).toEqual([500, 5, 489]);
 });
 
-test("detailed model stays within a real car envelope and uses seven batches", () => {
+test("detailed model stays within a real car envelope and uses eight batches", () => {
   const parts = buildCarParts();
-  expect(parts.length).toBe(7);
+  expect(parts.length).toBe(8);
+  expect(parts.filter((part) => part.animation === "drs").length).toBe(1);
+  expect(parts.filter((part) => part.tyreColored).length).toBe(1);
   const bounds = new THREE.Box3();
   for (const part of parts) {
     part.geometry.computeBoundingBox();
-    bounds.union(part.geometry.boundingBox!);
+    bounds.union(part.geometry.boundingBox!.clone().applyMatrix4(part.matrix));
     expect(Array.from(part.geometry.getAttribute("position").array).every(Number.isFinite)).toBe(true);
     part.geometry.dispose();
     part.material.dispose();

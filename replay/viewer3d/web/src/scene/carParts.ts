@@ -7,6 +7,8 @@ export interface CarPart {
   material: THREE.Material;
   matrix: THREE.Matrix4;
   colored?: boolean;
+  tyreColored?: boolean;
+  animation?: "drs";
 }
 
 /** Elliptical body sections [z, half-width, centre-height, half-height]. */
@@ -48,7 +50,7 @@ export function buildCarParts(): CarPart[] {
   const rubber = new THREE.MeshStandardMaterial({ color: 0x191b20, roughness: 0.94 });
   const metal = new THREE.MeshStandardMaterial({ color: 0x707886, metalness: 0.85, roughness: 0.28 });
   const visor = new THREE.MeshStandardMaterial({ color: 0x142b42, metalness: 0.75, roughness: 0.12 });
-  const stripe = new THREE.MeshStandardMaterial({ color: 0xe8dcbc, roughness: 0.65 });
+  const stripe = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.75 });
   const light = new THREE.MeshStandardMaterial({ color: 0xff2020, emissive: 0xff0808, emissiveIntensity: 2 });
   const parts: CarPart[] = [];
   type Point = [number, number, number];
@@ -89,7 +91,7 @@ export function buildCarParts(): CarPart[] {
   // Multi-element aero surfaces, endplates and rear diffuser strakes.
   for (let i = 0; i < 3; i++) {
     box([1.87, .035, .18], i === 0 ? carbon : paint, [0, .22 + i * .06, 2.7 - i * .15], [-.12, 0, 0]);
-    box([1.03, .045, .17], i === 0 ? carbon : paint, [0, .87 + i * .1, -2.25 - i * .1], [.15, 0, 0]);
+    if (i < 2) box([1.03, .045, .17], i === 0 ? carbon : paint, [0, .87 + i * .1, -2.25 - i * .1], [.15, 0, 0]);
   }
   for (const side of [-1, 1]) {
     box([.045, .24, .57], paint, [side * .94, .31, 2.56]);
@@ -140,9 +142,16 @@ export function buildCarParts(): CarPart[] {
     });
     const geometry = mergeGeometries(geometries);
     if (!geometry) throw new Error("Unable to batch car geometry");
-    batches.push({ geometry, material, matrix: new THREE.Matrix4(), colored: material === paint });
+    batches.push({ geometry, material, matrix: new THREE.Matrix4(), colored: material === paint, tyreColored: material === stripe });
     for (const source of geometries) source.dispose();
   }
+  // The top rear-wing element gets one additional instanced draw. Its geometry
+  // is local to the rear hinge so opening it never rotates the whole car.
+  const flap = new THREE.BoxGeometry(1.03, .045, .17);
+  flap.translate(0, 0, .085);
+  const matrix = new THREE.Matrix4().makeRotationX(.15);
+  matrix.setPosition(0, 1.07, -2.535);
+  batches.push({ geometry: flap, material: paint, matrix, colored: true, animation: "drs" });
   return batches;
 }
 

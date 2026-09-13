@@ -118,7 +118,7 @@ export function trackHeading(
 
 /**
  * Triangle strip between two polylines of equal length, laid flat on the
- * ground plane. Closed loop: the final station connects back to the first.
+ * ground plane. Closed by default; pass `closed=false` for partial markings.
  *
  * `colors` optionally supplies a per-station RGB triple, used for the
  * alternating red/white kerbs.
@@ -131,6 +131,7 @@ export function buildStripGeometry(
   origin: WorldOrigin,
   height = 0,
   colors?: (station: number) => [number, number, number],
+  closed = true,
 ): {
   positions: Float32Array;
   indices: Uint32Array;
@@ -144,7 +145,8 @@ export function buildStripGeometry(
   );
 
   const positions = new Float32Array(count * 2 * 3);
-  const indices = new Uint32Array((count - 1) * 6 + 6);
+  const segments = count < 2 ? 0 : count - 1 + (closed ? 1 : 0);
+  const indices = new Uint32Array(segments * 6);
   const vertexColors = colors ? new Float32Array(count * 2 * 3) : undefined;
 
   for (let i = 0; i < count; i += 1) {
@@ -168,13 +170,17 @@ export function buildStripGeometry(
   }
 
   let cursor = 0;
-  const quad = (a: number, b: number, c: number, d: number) => {
+  const triangle = (a: number, b: number, c: number) => {
+    const ax = positions[a * 3], az = positions[a * 3 + 2];
+    const normalY = (positions[b * 3 + 2] - az) * (positions[c * 3] - ax) -
+      (positions[b * 3] - ax) * (positions[c * 3 + 2] - az);
     indices[cursor++] = a;
-    indices[cursor++] = b;
-    indices[cursor++] = c;
-    indices[cursor++] = c;
-    indices[cursor++] = b;
-    indices[cursor++] = d;
+    indices[cursor++] = normalY >= 0 ? b : c;
+    indices[cursor++] = normalY >= 0 ? c : b;
+  };
+  const quad = (a: number, b: number, c: number, d: number) => {
+    triangle(a, b, c);
+    triangle(c, b, d);
   };
 
   // Winding is chosen to face up (+Y).
@@ -182,8 +188,9 @@ export function buildStripGeometry(
     const a = i * 2;
     quad(a, a + 1, a + 2, a + 3);
   }
-  // Close the loop.
-  quad((count - 1) * 2, (count - 1) * 2 + 1, 0, 1);
+  if (closed && count > 1) {
+    quad((count - 1) * 2, (count - 1) * 2 + 1, 0, 1);
+  }
 
   return { positions, indices, colors: vertexColors };
 }
