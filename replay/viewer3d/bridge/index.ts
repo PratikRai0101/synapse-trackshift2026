@@ -55,6 +55,7 @@ let latest: Payload | null = null;
 let sourceUp = false;
 let framesIn = 0;
 let reconnecting = false;
+let sourceId: unknown = null;
 
 const sticky: Record<string, unknown> = {};
 const clients = new Set<Client>();
@@ -68,6 +69,10 @@ function ingest(line: string): void {
   }
 
   framesIn += 1;
+  if (parsed.source_id !== sourceId) {
+    for (const key of Object.keys(sticky)) delete sticky[key];
+    sourceId = parsed.source_id;
+  }
 
   for (const field of STICKY_FIELDS) {
     if (parsed[field] != null) sticky[field] = parsed[field];
@@ -91,6 +96,12 @@ async function connectSource(): Promise<void> {
 
   const scheduleReconnect = () => {
     sourceUp = false;
+    latest = null;
+    sourceId = null;
+    for (const key of Object.keys(sticky)) delete sticky[key];
+    for (const client of clients) {
+      try { client.send(JSON.stringify({ type: "source_status", connected: false })); } catch { clients.delete(client); }
+    }
     if (reconnecting) return;
     reconnecting = true;
     setTimeout(() => {
@@ -168,6 +179,7 @@ const server = Bun.serve({
       // Late joiners get the current state (including retained geometry)
       // immediately instead of waiting for the next flush.
       if (latest) ws.send(JSON.stringify(latest));
+      else ws.send(JSON.stringify({ type: "source_status", connected: sourceUp }));
     },
     message() {
       // The viewer is read-only. Inbound messages are ignored.

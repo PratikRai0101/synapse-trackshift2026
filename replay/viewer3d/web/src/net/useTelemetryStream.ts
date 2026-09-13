@@ -27,7 +27,13 @@ export function useTelemetryStream(url: string = DEFAULT_URL): void {
 
       socket.onmessage = (event) => {
         try {
-          apply(JSON.parse(event.data as string) as TelemetryMessage);
+          const message = JSON.parse(event.data as string);
+          if (message.type === "source_status") {
+            setConnected(message.connected === true);
+            return;
+          }
+          apply(message as TelemetryMessage);
+          setConnected(true);
         } catch {
           // Ignore malformed frames; the next flush will replace the state.
         }

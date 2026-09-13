@@ -49,6 +49,13 @@ export function Hud() {
   const showCues = useViewerStore((state) => state.showCues);
   const toggleCues = useViewerStore((state) => state.toggleCues);
   const circuitLengthM = useViewerStore((state) => state.circuitLengthM);
+  const runMode = useViewerStore((state) => state.runMode);
+  const motionProvenance = useViewerStore((state) => state.motionProvenance);
+  const geometryProvenance = useViewerStore((state) => state.geometryProvenance);
+  const simulation = useViewerStore((state) => state.simulation);
+  const coordinateUnits = useViewerStore((state) => state.coordinateUnits);
+  const overlapCodes = useViewerStore((state) => state.overlapCodes);
+  const gapCodes = useViewerStore((state) => state.gapCodes);
 
   const cue = drivers ? focusCue(drivers, followedDriver, circuitLengthM) : null;
 
@@ -67,6 +74,36 @@ export function Hud() {
 
   return (
     <div className="hud">
+      {runMode !== "unknown" && (
+        <div className={`mode mode--${runMode}`} role="status">
+          <strong>
+            {runMode === "simulated" ? "SIMULATED BRANCH"
+              : runMode === "recorded" ? "RECORDED REPLAY" : "SYNTHETIC SOURCE"}
+          </strong>
+          {simulation && (
+            <>
+              <span>{simulation.command.toUpperCase()}</span>
+              <span>GAP {simulation.gap_s.toFixed(2)}s</span>
+              <span>ENERGY {simulation.ego_energy.toFixed(1)} EU</span>
+              <span className={simulation.contact ? "mode__warn" : undefined}>
+                {simulation.contact ? "CONTACT MODELLED" : "NO CONTACT"}
+              </span>
+            </>
+          )}
+          {coordinateUnits && coordinateUnits !== "m" && (
+            <span className="mode__warn">UNNORMALIZED {coordinateUnits.toUpperCase()}</span>
+          )}
+          {(overlapCodes.length > 0 || gapCodes.length > 0) && (
+            <span className="mode__warn"
+              title={`Ambiguous telemetry: ${motionProvenance}`}>
+              AMBIGUOUS · {[...new Set([...overlapCodes, ...gapCodes])].join(" ")}
+            </span>
+          )}
+          <span className="mode__note" title={`${motionProvenance} | ${geometryProvenance}`}>
+            PROVENANCE
+          </span>
+        </div>
+      )}
       <header className="hud__bar">
         <span className={`dot ${connected ? "dot--on" : "dot--off"}`} />
         <span className="hud__title">
@@ -151,6 +188,7 @@ export function Hud() {
             BEHIND {gapText(cue.gapBehindS)}
           </span>
           {cue.drs && <span className="cues__flag">DRS</span>}
+          {cue.inPit && <span className="cues__pit">PIT</span>}
         </div>
       )}
 

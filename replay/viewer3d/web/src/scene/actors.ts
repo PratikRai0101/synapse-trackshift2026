@@ -30,6 +30,8 @@ export interface PlaybackStep {
   sampleInterval?: number;
   paused?: boolean;
   reset?: boolean;
+  /** A shared timestamp buffer has already interpolated this frame. */
+  direct?: boolean;
 }
 const actors = new Map<string, Actor>();
 export function getActor(key: string): Actor | undefined { return actors.get(key); }
@@ -60,7 +62,17 @@ export function simulateActors(entries: ActorEntry[], origin: WorldOrigin, dt: n
     const moved = Math.hypot(dx, dy);
     const reset = playback.reset || Math.hypot(x - actor.target.x, z - actor.target.z) > 250;
     actor.discontinuity = Boolean(reset);
-    if (reset) {
+    if (playback.direct) {
+      if (Number.isFinite(entry.heading)) actor.heading = initialHeading;
+      else if (!reset && moved > .01) {
+        actor.heading += shortestAngle(actor.heading, Math.atan2(dx, dy)) * (1 - Math.exp(-18 * step));
+      }
+      actor.targetHeading = actor.heading;
+      actor.position.set(x, 0, z);
+      actor.start.copy(actor.position);
+      actor.target.copy(actor.position);
+      actor.elapsed = actor.duration;
+    } else if (reset) {
       actor.position.set(x, 0, z);
       actor.start.copy(actor.position);
       actor.target.copy(actor.position);

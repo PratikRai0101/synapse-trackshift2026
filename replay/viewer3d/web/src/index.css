@@ -134,6 +134,49 @@ canvas {
   gap: 2px;
 }
 
+.mode {
+  pointer-events: auto;
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  border: 1px solid var(--edge);
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: var(--panel);
+  backdrop-filter: blur(14px);
+  font-size: 11px;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+}
+
+.mode strong {
+  color: var(--text);
+}
+
+/* A simulated branch must never look like the recorded race. */
+.mode--simulated {
+  border-left-color: #b06cff;
+}
+
+.mode--recorded {
+  border-left-color: #3ddc84;
+}
+
+.mode--synthetic {
+  border-left-color: #ffd23f;
+}
+
+.mode__warn {
+  color: #ffb020;
+}
+
+.mode__note {
+  color: var(--muted);
+  opacity: 0.75;
+}
+
 .cues {
   pointer-events: auto;
   align-self: flex-start;
@@ -159,6 +202,11 @@ canvas {
 
 .cues__flag {
   color: #4ade80;
+  font-weight: 700;
+}
+
+.cues__pit {
+  color: #9aa4b2;
   font-weight: 700;
 }
 
