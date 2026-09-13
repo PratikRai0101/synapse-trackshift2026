@@ -54,6 +54,8 @@ class SimulationStep:
     ego_speed_kmh: float
     gap_s: float
     ego_energy: float
+    ego_distance_m: float = 0.0
+    rival_distance_m: float = 0.0
 
 
 class ClosedLoopSimulator:
@@ -97,6 +99,7 @@ class ClosedLoopSimulator:
         rival_speed = (initial_speed if initial_rival_speed_kmh is None
                        else float(initial_rival_speed_kmh))
         self.rival = CarState(rival_speed, initial_gap, energy)
+        self.rival_distance_m = initial_gap * max(initial_speed / 3.6, 1.0)
         self.plant = VehiclePlant(PlantState(
             speed_kmh=initial_speed,
             energy=energy,
@@ -171,10 +174,21 @@ class ClosedLoopSimulator:
         # remaining-energy floor. Convert units/meaning at the layer boundary.
         reserve_target = (max(5.0, self.ego.energy - target_remaining)
                           if target is not None else None)
+        # Level 2 decides the tactical intent; Level 1 must execute it. Without
+        # this bound the LP is free to choose zero deployment for every action,
+        # which made BURN and HARVEST differ by bookkeeping only.
+        can_deploy = can_deploy and self.ego.energy > 5.0
+        power_bounds = {
+            "BURN": (0.70, 1.0),
+            "PROACTIVE TRAP": (0.25, 0.85),
+            "HARVEST": (0.0, 0.10),
+        }.get(decision.command, (0.0, 1.0))
+        if decision.command == "BURN" and not can_deploy:
+            power_bounds = (0.0, 1.0)  # no reserve to spend on an attack
         execution, mpc = self.execution.track_zone(
             decision.lambda_kin, decision.lambda_b, 100.0,
             decision.target_speed_kmh, self.ego.speed_kmh, self.ego.energy,
-            reserve_target,
+            reserve_target, power_bounds, cfg.dt_s,
         )
         self.last_mpc_result = mpc
         mpc_fraction = (execution.mpc_power_fraction or 0.0) if self.use_mpc else 1.0
@@ -182,13 +196,15 @@ class ClosedLoopSimulator:
         regen_fraction = (max(strategic_regen, mpc.regen_fraction)
                           if self.use_mpc else strategic_regen)
         brake_fraction = mpc.brake_fraction if self.use_mpc else 0.0
-        if decision.command == "BURN" and self.ego.energy > 5.0 and can_deploy:
+        if decision.command == "BURN" and can_deploy:
             power_fraction = mpc_fraction
             deployment = (min(cfg.battery_burn_per_s * power_fraction, target_remaining)
                           if target is not None else cfg.battery_burn_per_s * power_fraction)
             self.lap_deployed += deployment * cfg.dt_s
         else:
-            power_fraction = 0.0
+            # The bound already encodes non-deploying actions, so the MPC's own
+            # feasible power still reaches the plant.
+            power_fraction = mpc_fraction
         curvature = 0.0012 + 0.0008 * math.sin(self.plant.state.distance_m / 180.0)
         previous_energy = self.plant.state.energy
         plant_step = self.plant.step(
@@ -221,11 +237,11 @@ class ClosedLoopSimulator:
             rival_accel = cfg.rival_accel_kmh_s + defense_bonus
         self.rival.speed_kmh = max(0.0, self.rival.speed_kmh +
                                    (rival_accel - cfg.drag_kmh_s) * cfg.dt_s)
-        # Positive gap means the rival remains ahead. Approximate time-gap
-        # dynamics from relative speed; clamp rather than silently wrap.
-        self.ego.gap_s = max(0.0, self.ego.gap_s +
-                             (self.rival.speed_kmh - self.ego.speed_kmh) /
-                             3.6 * cfg.dt_s / max(self.ego.speed_kmh / 3.6, 1.0))
+        self.rival_distance_m += self.rival.speed_kmh / 3.6 * cfg.dt_s
+        # Derive gap from the same longitudinal state exported for visualization.
+        # Integrating a separate time gap drifts when the ego speed changes.
+        self.ego.gap_s = max(0.0, (self.rival_distance_m - self.plant.state.distance_m) /
+                             max(self.ego.speed_kmh / 3.6, 1.0))
         self.rival.gap_s = self.ego.gap_s
         self.time_s += cfg.dt_s
         self.step_index += 1
@@ -237,6 +253,7 @@ class ClosedLoopSimulator:
                                         public.throttle_pct, public.brake,
                                         self.ego.gap_s, public.active_aero),
             decision, self.ego.speed_kmh, self.ego.gap_s, self.ego.energy,
+            self.plant.state.distance_m, self.rival_distance_m,
         )
 
     def pit_stop(self) -> None:

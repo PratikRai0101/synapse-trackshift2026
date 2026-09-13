@@ -206,12 +206,21 @@ class FastExecutionController:
     def track_zone(self, lambda_kin: float, lambda_b: float,
                    pedal_pct: float, target_speed_kmh: float,
                    current_speed_kmh: float, energy: float,
-                   target_energy: float | None = None) -> tuple[Level1Command, ZoneMPCResult]:
-        """Run the LP zone MPC and attach its first action to the cue."""
+                   target_energy: float | None = None,
+                   power_bounds: tuple[float, float] | None = None,
+                   elapsed_s: float | None = None
+                   ) -> tuple[Level1Command, ZoneMPCResult]:
+        """Run the LP zone MPC and attach its first action to the cue.
+
+        ``power_bounds`` is the tactical deployment intent from Level 2; the
+        MPC still enforces rate, reserve and thermal feasibility.
+        """
         cue = self.command(lambda_kin, lambda_b, pedal_pct,
                            target_speed_kmh, current_speed_kmh)
         zone = self.mpc.solve(current_speed_kmh, energy, target_speed_kmh,
-                              target_energy)
+                              target_energy,
+                              power_bounds=power_bounds or (0.0, 1.0),
+                              elapsed_s=elapsed_s)
         return Level1Command(cue.cue, cue.engine_power_fraction,
                              cue.electric_power_fraction, cue.regen_fraction,
                              cue.constrained, zone.power_fraction), zone
