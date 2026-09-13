@@ -288,6 +288,9 @@ class F1RaceReplayWindow(arcade.Window):
         if not hasattr(self, 'telemetry_stream') or not self.telemetry_stream:
             return
             
+        if not hasattr(self, "_viewer_source_id"):
+            from uuid import uuid4
+            self._viewer_source_id = uuid4().hex
         current_frame = self.frames[min(int(self.frame_index), len(self.frames) - 1)] if self.frames else None
         
         # Get current track status
@@ -348,6 +351,11 @@ class F1RaceReplayWindow(arcade.Window):
             for code, rgb in self.driver_colors.items()
         }
         payload = {
+            "source_id": self._viewer_source_id,
+            "coordinate_units": "dm",  # FastF1 X/Y are 1/10 m; Distance is metres.
+            "run_mode": "recorded",
+            "geometry_provenance": "FastF1 centreline; schematic 20 m ribbon, not surveyed boundaries",
+            "motion_provenance": "Recorded FastF1 positions; pit status from recorded pit windows",
             "frame_index": int(self.frame_index),
             "frame": current_frame,
             "track_status": current_track_status,
