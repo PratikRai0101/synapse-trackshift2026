@@ -82,7 +82,7 @@ Environment overrides: `TELEMETRY_PORT` (9999), `WS_PORT` (9998),
 | `VIEW` | Chase, broadcast or overhead follow framing |
 | `CUES` | DRS zones, focus ring and gap tether (on by default) |
 | `SIZE` | Maximum car scale: 1x, 1.5x, 2x, 3x, 5x; auto-fitted to available space |
-| `LABELS` | Driver code tags above each car |
+| `LABELS` | Driver tags; follow mode limits them to the focus car and two cars either side |
 
 ### Why cars are scaled up
 
@@ -141,15 +141,33 @@ The **CAM** button in the HUD toggles between:
   leaderboard row to select a car, or click **FOLLOW** to return to the live
   race leader.
 
+## Visual presentation
+
+- Procedural asphalt grain and grass textures, generated locally with mipmaps
+  and anisotropic filtering; texture size is tied to world coordinates.
+- Distance-based red/white kerb blocks, with an explicit lap seam. Partial DRS
+  markings stay open rather than bridging their endpoints across the track.
+- Neutral daylight sky and atmospheric haze, plus SMAA edge antialiasing. These
+  are presentation choices, **not reconstructed event weather**.
+- Tyre sidewall colours follow reported compound IDs; unknown values use grey.
+- The top rear-wing flap follows the replay's existing DRS flag convention. It
+  animates visually but does not change drag, authorize DRS or predict a pass.
+- Cars use eight instanced material/animation batches for the whole field; the
+  independently moving flap adds one draw beyond the seven static batches.
+
+This pass does not recalibrate telemetry units, reconstruct track widths,
+add elevation, or remove the existing auto-fit size workaround.
+
 ## Swapping in a real car model
 
 The default car is a generic open-wheel model built from primitives, tinted per
 team from `driver_colors` in the telemetry payload. Real F1 geometry and liveries
 are trademarked, so team colour is applied to a neutral shape.
 
-To use a GLTF instead, drop it at `web/public/models/car.glb`. See
-[`web/public/models/README.md`](web/public/models/README.md) for sourcing and
-licensing notes, and `web/src/scene/carParts.ts` for the current definition.
+The current renderer uses `web/src/scene/carParts.ts`; it does not automatically
+load a GLTF dropped into `public/models`. A future asset loader must preserve
+team/tyre tinting, the DRS hinge and instancing. See
+[`web/public/models/README.md`](web/public/models/README.md) for sourcing notes.
 
 ## Data the viewer depends on
 
@@ -190,7 +208,7 @@ to contrast with the ground plane. If you retune colours, check both views with
 overview and vice versa.
 
 **`logarithmicDepthBuffer` is required.** The circuit spans kilometres while the
-track surface sits only ~1 m above the ground plane. With a linear depth buffer
+track surface sits only 0.08 world units above the ground plane. With a linear depth buffer
 and a large `far` plane the ground punches through the track, which presents as
 the circuit partially disappearing at orbit distance. Do not remove it from the
 Canvas `gl` props, and keep `near` well above 1.

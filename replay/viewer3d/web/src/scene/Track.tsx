@@ -1,9 +1,11 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
+import { useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { useViewerStore } from "../state/store";
 import { buildStripGeometry, computeBounds, sceneX, sceneZ } from "./world";
 import { insetEdge } from "./trackDetails";
 import { drsZoneRanges } from "./cues";
+import { kerbGeometry, kerbTexture, planarUVs, surfaceTexture } from "./surfaces";
 
 /**
  * The circuit surface: asphalt ribbon, alternating kerbs, ground plane and a
@@ -27,17 +29,27 @@ function toGeometry(data: StripData): THREE.BufferGeometry {
     geometry.setAttribute("color", new THREE.BufferAttribute(data.colors, 3));
   }
   geometry.computeVertexNormals();
+  planarUVs(geometry);
   return geometry;
 }
-
-const KERB_PALETTE: [number, number, number][] = [
-  [0.92, 0.14, 0.16],
-  [1.0, 1.0, 1.0],
-];
 
 export function Track() {
   const geometry = useViewerStore((state) => state.geometry);
   const origin = useViewerStore((state) => state.origin);
+  const showCues = useViewerStore((state) => state.showCues);
+  const gl = useThree((state) => state.gl);
+  const textures = useMemo(() => {
+    const asphalt = surfaceTexture("asphalt");
+    const grass = surfaceTexture("grass");
+    const kerb = kerbTexture();
+    for (const texture of [asphalt, grass, kerb]) {
+      texture.anisotropy = Math.min(8, gl.capabilities.getMaxAnisotropy());
+    }
+    return { asphalt, grass, kerb };
+  }, [gl]);
+  useEffect(() => () => {
+    for (const texture of Object.values(textures)) texture.dispose();
+  }, [textures]);
 
   const built = useMemo(() => {
     if (!geometry || !origin) return null;
@@ -73,15 +85,8 @@ export function Track() {
     const innerLine = toGeometry(buildStripGeometry(innerKerbNearX, innerKerbNearY, innerPaint.x, innerPaint.y, origin, .025));
     const outerLine = toGeometry(buildStripGeometry(outerKerbNearX, outerKerbNearY, outerPaint.x, outerPaint.y, origin, .025));
 
-    const kerbColor = (station: number): [number, number, number] =>
-      KERB_PALETTE[Math.floor(station / 8) % 2];
-
-    const innerKerb = toGeometry(
-      buildStripGeometry(iX, iY, innerKerbNearX, innerKerbNearY, origin, 0.02, kerbColor),
-    );
-    const outerKerb = toGeometry(
-      buildStripGeometry(oX, oY, outerKerbNearX, outerKerbNearY, origin, 0.02, kerbColor),
-    );
+    const innerKerb = kerbGeometry(iX, iY, innerKerbNearX, innerKerbNearY, origin);
+    const outerKerb = kerbGeometry(oX, oY, outerKerbNearX, outerKerbNearY, origin);
 
     // Start/finish line at station 0, laid across the track.
     const second = Math.min(4, x.length - 1);
@@ -112,11 +117,17 @@ export function Track() {
         1.4,
       );
       return toGeometry(
-        buildStripGeometry(outerSliceX, outerSliceY, innerSliceX, innerSliceY, origin, 0.035),
+        buildStripGeometry(outerSliceX, outerSliceY, innerSliceX, innerSliceY, origin, 0.035, undefined, false),
       );
     });
 
+    const groundSize = Math.max(bounds.width, bounds.depth) * 4;
+    const ground = new THREE.PlaneGeometry(groundSize, groundSize);
+    ground.rotateX(-Math.PI / 2);
+    planarUVs(ground, 12);
+
     return {
+      ground,
       asphalt,
       innerKerb,
       outerKerb,
@@ -134,6 +145,14 @@ export function Track() {
     };
   }, [geometry, origin]);
 
+  useEffect(() => () => {
+    if (!built) return;
+    for (const value of Object.values(built)) {
+      if (value instanceof THREE.BufferGeometry) value.dispose();
+    }
+    for (const zone of built.drsZones) zone.dispose();
+  }, [built]);
+
   if (!built) return null;
 
   return (
@@ -144,18 +163,21 @@ export function Track() {
         renderOrder={1}
       >
         <meshStandardMaterial
-          color="#3d434b"
-          roughness={0.95}
-          metalness={0.04}
+          color="#b2b5b7"
+          map={textures.asphalt}
+          bumpMap={textures.asphalt}
+          bumpScale={.012}
+          roughness={0.97}
+          metalness={0}
           envMapIntensity={0.7}
         />
       </mesh>
 
       <mesh geometry={built.innerKerb} receiveShadow renderOrder={2}>
-        <meshStandardMaterial vertexColors roughness={0.7} metalness={0.02} />
+        <meshStandardMaterial map={textures.kerb} roughness={0.85} />
       </mesh>
       <mesh geometry={built.outerKerb} receiveShadow renderOrder={2}>
-        <meshStandardMaterial vertexColors roughness={0.7} metalness={0.02} />
+        <meshStandardMaterial map={textures.kerb} roughness={0.85} />
       </mesh>
 
       <mesh geometry={built.innerLine} receiveShadow renderOrder={3}>
@@ -165,7 +187,7 @@ export function Track() {
         <meshStandardMaterial color="#e2e1d9" roughness={.9} />
       </mesh>
 
-      {built.drsZones.map((zone, index) => (
+      {showCues && built.drsZones.map((zone, index) => (
         <mesh key={index} geometry={zone} renderOrder={4}>
           <meshBasicMaterial color="#2fd46a" transparent opacity={0.5} />
         </mesh>
@@ -184,13 +206,13 @@ export function Track() {
       </mesh>
 
       <mesh
-        rotation={[-Math.PI / 2, 0, 0]}
-        position={[0, -1.5, 0]}
+        geometry={built.ground}
+        position={[0, -.08, 0]}
         receiveShadow
       >
-        <planeGeometry args={[built.groundSize, built.groundSize]} />
         <meshStandardMaterial
-          color="#16211b"
+          map={textures.grass}
+          color="#b8b8ac"
           roughness={1}
           metalness={0}
           envMapIntensity={0.5}

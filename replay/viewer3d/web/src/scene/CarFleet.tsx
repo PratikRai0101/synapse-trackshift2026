@@ -6,6 +6,8 @@ import { simulateActors, type ActorEntry } from "./actors";
 import { useViewerStore } from "../state/store";
 import { trackHeading } from "./world";
 import { fitCarScales } from "./spacing";
+import { drsOpening, tyreColour } from "./appearance";
+import { battleSet, orderCodes } from "./cues";
 
 /**
  * All cars in one set of `InstancedMesh`es, one mesh per car part, plus a
@@ -89,6 +91,7 @@ export function CarFleet() {
   const parts = useMemo(() => buildCarParts(), []);
   const sample = useRef({ frame: -1, time: 0, interval: 1 / 30 });
   const displayScales = useRef(new Map<string, number>());
+  const drsStates = useRef(new Map<string, number>());
   const carScale = useViewerStore((state) => state.carScale);
   const showLabels = useViewerStore((state) => state.showLabels);
 
@@ -110,6 +113,7 @@ export function CarFleet() {
       );
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       mesh.castShadow = true;
+      mesh.receiveShadow = true;
       mesh.frustumCulled = false;
       mesh.count = 0;
       root.add(mesh);
@@ -118,22 +122,23 @@ export function CarFleet() {
     return { group: root, meshes: instances };
   }, [parts]);
 
-  useEffect(
-    () => () => {
-      for (const mesh of meshes) mesh.dispose();
-      for (const texture of labelTextures.values()) texture.dispose();
-      labelTextures.clear();
-    },
-    [meshes],
-  );
-
   const labels = useMemo(() => new Map<string, THREE.Sprite>(), []);
+  useEffect(() => () => {
+    for (const mesh of meshes) mesh.dispose();
+    for (const part of parts) part.geometry.dispose();
+    for (const material of new Set(parts.map((part) => part.material))) material.dispose();
+    for (const sprite of labels.values()) sprite.material.dispose();
+    for (const texture of labelTextures.values()) texture.dispose();
+    labelTextures.clear();
+  }, [meshes, parts, labels]);
   const colorSignature = useMemo(() => ({ value: "" }), []);
 
   const scratch = useMemo(
     () => ({
       car: new THREE.Matrix4(),
       part: new THREE.Matrix4(),
+      local: new THREE.Matrix4(),
+      flap: new THREE.Matrix4(),
       quaternion: new THREE.Quaternion(),
       euler: new THREE.Euler(),
       scale: new THREE.Vector3(1, 1, 1),
@@ -145,6 +150,7 @@ export function CarFleet() {
   useFrame((state, delta) => {
     const store = useViewerStore.getState();
     const { origin, drivers } = store;
+    group.visible = Boolean(origin && drivers);
     if (!origin || !drivers) return;
 
     const dt = Math.min(delta, 0.1);
@@ -183,6 +189,7 @@ export function CarFleet() {
     }
 
     // Shared with CameraRig. Returned in the same order as `entries`.
+    entries.splice(MAX_ACTORS);
     const now = state.clock.elapsedTime;
     let reset = false;
     if (store.frameIndex !== sample.current.frame) {
@@ -203,6 +210,18 @@ export function CarFleet() {
     for (const key of displayScales.current.keys()) {
       if (!activeKeys.has(key)) displayScales.current.delete(key);
     }
+    for (const key of drsStates.current.keys()) {
+      if (!activeKeys.has(key)) drsStates.current.delete(key);
+    }
+    for (const [key, sprite] of labels) {
+      if (activeKeys.has(key)) continue;
+      group.remove(sprite);
+      sprite.material.dispose();
+      labels.delete(key);
+    }
+    const focus = store.followedDriver && drivers[store.followedDriver]
+      ? store.followedDriver : codes[0] ?? null;
+    const visibleCodes = store.cameraMode === "follow" ? battleSet(orderCodes(drivers), focus) : null;
 
     const camera = state.camera as THREE.PerspectiveCamera;
     const tanHalfFov = Math.tan((camera.fov * Math.PI) / 360);
@@ -221,13 +240,25 @@ export function CarFleet() {
       scratch.scale.setScalar(worldScale);
       scratch.car.compose(actor.position, scratch.quaternion, scratch.scale);
 
+      const previousDrs = drsStates.current.get(actor.key);
+      const opening = drsOpening(previousDrs ?? 0, drivers[actor.key]?.drs, dt,
+        reset || store.paused || previousDrs === undefined);
+      drsStates.current.set(actor.key, opening);
       for (let i = 0; i < meshes.length; i += 1) {
-        scratch.part.multiplyMatrices(scratch.car, parts[i].matrix);
+        scratch.local.copy(parts[i].matrix);
+        if (parts[i].animation === "drs") {
+          scratch.flap.makeRotationX(-.6 * opening);
+          scratch.local.multiply(scratch.flap);
+        }
+        scratch.part.multiplyMatrices(scratch.car, scratch.local);
         meshes[i].setMatrixAt(index, scratch.part);
+        if (parts[i].tyreColored) {
+          meshes[i].setColorAt(index, cachedColor(tyreColour(drivers[actor.key]?.tyre)));
+        }
       }
 
-      // --- Driver label -------------------------------------------------
-      if (!showLabels) continue;
+      // Follow mode labels only the immediate battle, not all twenty cars.
+      if (!showLabels || (visibleCodes && !visibleCodes.has(actor.key) && actor.key !== "__SC")) continue;
       activeLabels.add(actor.key);
 
       let sprite = labels.get(actor.key);
@@ -243,6 +274,11 @@ export function CarFleet() {
         group.add(sprite);
         labels.set(actor.key, sprite);
       }
+      const texture = labelTexture(actor.key, store.driverColors[actor.key] ?? (actor.key === "__SC" ? "#ffb020" : "#9aa4b2"));
+      if (sprite.material.map !== texture) {
+        sprite.material.map = texture;
+        sprite.material.needsUpdate = true;
+      }
 
       scratch.world
         .copy(actor.position)
@@ -257,6 +293,7 @@ export function CarFleet() {
     for (const mesh of meshes) {
       mesh.count = simulated.length;
       mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     }
 
     for (const [key, sprite] of labels) {
@@ -279,13 +316,6 @@ export function CarFleet() {
         if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
       }
 
-      for (const entry of entries) {
-        const sprite = labels.get(entry.key);
-        if (!sprite) continue;
-        const material = sprite.material as THREE.SpriteMaterial;
-        material.map = labelTexture(entry.key, `#${entry.color.getHexString()}`);
-        material.needsUpdate = true;
-      }
     }
   }, -2);
 

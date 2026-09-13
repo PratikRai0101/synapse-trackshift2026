@@ -3,8 +3,10 @@ import {
   EffectComposer,
   ToneMapping,
   Vignette,
+  SMAA,
 } from "@react-three/postprocessing";
 import { ToneMappingMode } from "postprocessing";
+import { Sky } from "@react-three/drei";
 import { Lighting } from "./Lighting";
 import { Track } from "./Track";
 import { CarFleet } from "./CarFleet";
@@ -23,10 +25,11 @@ export function Scene() {
 
   return (
     <>
-      <color attach="background" args={["#04060b"]} />
-      {/* Fades the far ground into the background so the plane's edge is not a
-          hard horizon line. */}
-      <fog attach="fog" args={["#04060b", radius * 2.2, radius * 7]} />
+      {/* Neutral daylight presentation, not a reconstruction of event weather. */}
+      <color attach="background" args={["#abbfc8"]} />
+      <Sky distance={20000} sunPosition={[.6, 1.1, .4]}
+        turbidity={3} rayleigh={.7} mieCoefficient={.003} mieDirectionalG={.8} />
+      <fog attach="fog" args={["#abbfc8", radius * 2.2, radius * 6]} />
 
       <Lighting />
       <Track />
@@ -34,7 +37,7 @@ export function Scene() {
       <CarCues />
       <CameraRig />
 
-      <EffectComposer>
+      <EffectComposer multisampling={0}>
         <Bloom
           intensity={0.2}
           luminanceThreshold={1.1}
@@ -42,7 +45,8 @@ export function Scene() {
           mipmapBlur
         />
         <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
-        <Vignette offset={0.22} darkness={0.25} eskil={false} />
+        <Vignette offset={0.22} darkness={0.15} eskil={false} />
+        <SMAA />
       </EffectComposer>
     </>
   );
