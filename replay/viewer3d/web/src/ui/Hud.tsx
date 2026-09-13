@@ -57,6 +57,7 @@ export function Hud() {
   const coordinateUnits = useViewerStore((state) => state.coordinateUnits);
   const overlapCodes = useViewerStore((state) => state.overlapCodes);
   const gapCodes = useViewerStore((state) => state.gapCodes);
+  const reconstructedCodes = useViewerStore((state) => state.reconstructedCodes);
 
   const cue = drivers ? focusCue(drivers, followedDriver, circuitLengthM) : null;
 
@@ -103,6 +104,12 @@ export function Hud() {
             <span className="mode__warn"
               title={`Ambiguous telemetry: ${motionProvenance}`}>
               AMBIGUOUS · {[...new Set([...overlapCodes, ...gapCodes])].join(" ")}
+            </span>
+          )}
+          {reconstructedCodes.length > 0 && (
+            <span className="mode__note"
+              title="Sparse samples over a corner: the path between them follows the track centreline, carrying the recorded lateral offset. This is reconstruction along known geometry, not a modelled racing line.">
+              RECONSTRUCTED · {reconstructedCodes.length}
             </span>
           )}
           <span className="mode__note" title={`${motionProvenance} | ${geometryProvenance}`}>

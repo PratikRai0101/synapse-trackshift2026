@@ -23,7 +23,7 @@ export interface DriverState {
   /** Source orientation in scene convention: atan2(vx, vy), radians. */
   heading?: number;
   in_pit?: boolean;
-  motion_quality?: "sampled" | "gap";
+  motion_quality?: "sampled" | "gap" | "reconstructed";
 }
 
 export interface WeatherState {
