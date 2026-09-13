@@ -922,6 +922,10 @@ class DriverInfoComponent(BaseComponent):
         arcade.draw_rect_filled(arcade.XYWH(center_x, header_cy, box_width, header_height), team_color)
         arcade.Text(f"Driver: {code}", left + 10, header_cy, arcade.color.BLACK, 14, anchor_y="center",
                     bold=True).draw()
+        # Recorded pit-lane state, shown as a badge on the team-colour header.
+        if driver_pos.get("in_pit"):
+            arcade.Text("PIT", right - 12, header_cy, arcade.color.WHITE, 14,
+                        anchor_x="right", anchor_y="center", bold=True).draw()
 
         cursor_y, row_gap = top - header_height - 25, 25
         left_text_x = left + 15
@@ -1297,6 +1301,7 @@ class RaceProgressBarComponent(BaseComponent):
     # Event type constants for clear identification
     EVENT_DNF = "dnf"
     EVENT_LAP = "lap"
+    EVENT_PIT = "pit"
     EVENT_YELLOW_FLAG = "yellow_flag"
     EVENT_RED_FLAG = "red_flag"
     EVENT_SAFETY_CAR = "safety_car"
@@ -1308,6 +1313,7 @@ class RaceProgressBarComponent(BaseComponent):
         "progress_fill": F1_RED,
         "progress_border": EDGE,
         "dnf": (220, 50, 50),
+        "pit": (235, 235, 240),
         "lap_marker": (70, 70, 84),
         "yellow_flag": (255, 220, 0),
         "red_flag": (220, 30, 30),
@@ -1517,7 +1523,13 @@ class RaceProgressBarComponent(BaseComponent):
             y = marker_top - size
             arcade.draw_line(x - size, y - size, x + size, y + size, color, 2)
             arcade.draw_line(x - size, y + size, x + size, y - size, color, 2)
-            
+
+        elif event_type == self.EVENT_PIT:
+            # Recorded pit-lane entry: a light tally just above the bar.
+            arcade.draw_rect_filled(
+                arcade.XYWH(x, marker_top - 4, 5, 9), self.COLORS["pit"]
+            )
+
         elif event_type == self.EVENT_YELLOW_FLAG:
             # Draw yellow flag indicator on the bar
             self._draw_flag_segment(event, self.COLORS["yellow_flag"])
@@ -1584,6 +1596,7 @@ class RaceProgressBarComponent(BaseComponent):
         # Build tooltip text
         type_names = {
             self.EVENT_DNF: "DNF",
+            self.EVENT_PIT: "Pit Stop",
             self.EVENT_YELLOW_FLAG: "Yellow Flag",
             self.EVENT_RED_FLAG: "Red Flag",
             self.EVENT_SAFETY_CAR: "Safety Car",
@@ -1626,6 +1639,7 @@ class RaceProgressBarComponent(BaseComponent):
     def _draw_legend(self, window):
         """Draw a small legend explaining the markers."""
         legend_items = [
+            (self.COLORS["pit"], "P", "Pit"),
             (self.COLORS["yellow_flag"], "■", "Yellow"),
             (self.COLORS["red_flag"], "■", "Red"),
             (self.COLORS["safety_car"], "■", "SC"),
@@ -1634,9 +1648,12 @@ class RaceProgressBarComponent(BaseComponent):
         
         legend_x = self._bar_left + self._bar_width + 50
         legend_y = self.bottom + self.height / 2
+        # Keep every legend item on screen even with the extra pit entry.
+        available = max(40.0, float(window.width) - legend_x - 20.0)
+        spacing = min(45.0, available / max(1, len(legend_items)))
         
         for i, (color, symbol, label) in enumerate(legend_items):
-            x = legend_x + (i * 45)
+            x = legend_x + (i * spacing)
             arcade.Text(
                 symbol,
                 x, legend_y + 2,
@@ -2208,6 +2225,7 @@ def extract_race_events(frames: List[dict], track_statuses: List[dict], total_la
     
     # Track drivers present in each frame
     prev_drivers = set()
+    prev_in_pit = {}
     
     # Sample frames at regular intervals for performance (every 25 frames = 1 second)
     sample_rate = 25
@@ -2216,6 +2234,19 @@ def extract_race_events(frames: List[dict], track_statuses: List[dict], total_la
         frame = frames[i]
         drivers_data = frame.get("drivers", {})
         current_drivers = set(drivers_data.keys())
+
+        # Detect recorded pit-lane entries on the rising edge of ``in_pit``.
+        # This is observed data, not a model prediction.
+        for driver_code, pos in drivers_data.items():
+            in_pit = bool(pos.get("in_pit"))
+            if in_pit and not prev_in_pit.get(driver_code, False):
+                events.append({
+                    "type": RaceProgressBarComponent.EVENT_PIT,
+                    "frame": i,
+                    "label": driver_code,
+                    "lap": pos.get("lap", "?"),
+                })
+            prev_in_pit[driver_code] = in_pit
         
         # Detect DNFs (drivers who disappeared)
         if prev_drivers:

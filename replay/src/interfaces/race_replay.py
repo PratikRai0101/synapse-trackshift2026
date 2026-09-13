@@ -1413,6 +1413,9 @@ class F1RaceReplayWindow(arcade.Window):
                 arcade.draw_circle_filled(mx, my, 3.0, colour)
             else:
                 arcade.draw_circle_filled(mx, my, 2.1, (120, 120, 132))
+            # Recorded pit-lane state: a white ring marks a car in the pits.
+            if pos.get("in_pit"):
+                arcade.draw_circle_outline(mx, my, 6.5, (255, 255, 255), 1.2)
 
     def _build_focus_report(self, frame, selected_drivers, ordered_codes, driver_progress):
         """Build the Race Engineer decision report for the focus driver."""
