@@ -57,7 +57,9 @@ interface ViewerState {
   simulation: TelemetryMessage["simulation"] | null;
   overlapCodes: string[];
   gapCodes: string[];
-  setRenderWarnings: (overlaps: string[], gaps: string[]) => void;
+  /** Cars whose path this frame was reconstructed along the centreline. */
+  reconstructedCodes: string[];
+  setRenderWarnings: (overlaps: string[], gaps: string[], reconstructed: string[]) => void;
   hasData: boolean;
   geometry: TrackGeometry | null;
   origin: WorldOrigin | null;
@@ -106,9 +108,12 @@ export const useViewerStore = create<ViewerState>((set) => ({
   simulation: null,
   overlapCodes: [],
   gapCodes: [],
-  setRenderWarnings: (overlapCodes, gapCodes) => set((state) =>
-    state.overlapCodes.join() === overlapCodes.join() && state.gapCodes.join() === gapCodes.join()
-      ? state : { overlapCodes, gapCodes }),
+  reconstructedCodes: [],
+  setRenderWarnings: (overlapCodes, gapCodes, reconstructedCodes) => set((state) =>
+    state.overlapCodes.join() === overlapCodes.join() &&
+    state.gapCodes.join() === gapCodes.join() &&
+    state.reconstructedCodes.join() === reconstructedCodes.join()
+      ? state : { overlapCodes, gapCodes, reconstructedCodes }),
   hasData: false,
   geometry: null,
   origin: null,
@@ -155,7 +160,7 @@ export const useViewerStore = create<ViewerState>((set) => ({
         geometryProvenance: message.geometry_provenance ?? "Unspecified track geometry",
         motionProvenance: message.motion_provenance ?? "Unspecified motion source",
         simulation: message.simulation ?? null,
-        ...(changed ? { geometry: null, origin: null, overlapCodes: [], gapCodes: [], driverColors: {} } : {}),
+        ...(changed ? { geometry: null, origin: null, overlapCodes: [], gapCodes: [], reconstructedCodes: [], driverColors: {} } : {}),
         hasData: true,
         drivers: message.frame?.drivers ?? null,
         safetyCar: message.frame?.safety_car ?? null,
@@ -182,6 +187,8 @@ export const useViewerStore = create<ViewerState>((set) => ({
       if (message.track_geometry && (changed || !state.geometry)) {
         next.geometry = message.track_geometry;
         next.origin = computeOrigin(message.track_geometry);
+        // The playback buffer reconstructs sparse-sample paths along this line.
+        playback.setTrack(message.track_geometry);
       }
 
       return next;

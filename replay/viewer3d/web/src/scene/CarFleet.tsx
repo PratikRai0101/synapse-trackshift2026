@@ -201,7 +201,10 @@ export function CarFleet() {
     const simulated = simulateActors(entries, origin, dt, { paused: store.paused, reset, direct: true });
     const fittedScales = fitCarScales(simulated, carScale);
     const overlaps = detectOverlaps(simulated, carScale);
-    store.setRenderWarnings([...overlaps].sort(), Object.keys(drivers).filter((code) => drivers[code].motion_quality === "gap").sort());
+    const reconstructed = Object.keys(drivers).filter((code) => drivers[code].motion_quality === "reconstructed").sort();
+    store.setRenderWarnings([...overlaps].sort(),
+      Object.keys(drivers).filter((code) => drivers[code].motion_quality === "gap").sort(),
+      reconstructed);
     const activeKeys = new Set(simulated.map((actor) => actor.key));
     for (const key of drsStates.current.keys()) {
       if (!activeKeys.has(key)) drsStates.current.delete(key);

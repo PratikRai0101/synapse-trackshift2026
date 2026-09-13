@@ -176,6 +176,34 @@ but it does not reproduce the 2D numbers exactly. Single-sourcing the order in t
 backend would make both agree; that changes 2D leaderboard behaviour, so it is a
 deliberate decision rather than a rendering fix.
 
+## Trajectory reconstruction
+
+Between two observations the racing line is unknown. Interpolating a straight
+chord across a corner is the one case where that ignorance is *visible*, because
+the car leaves the track. Measured on the cached Italian GP race, a chord between
+samples 0.33 s apart (sparse source, ~300 km/h) deviates by up to **5.05 m** from
+the line at the first chicane — a quarter of the 20 m ribbon.
+
+The buffer therefore reconstructs sparse intervals along the **centreline**
+(`net/trackPath.ts`): it locates both samples on the arc-length table, follows the
+track between those two positions, and carries the recorded lateral offset across,
+so the car stays on the side of the track it was recorded on. It never invents a
+racing line — it follows known geometry.
+
+Engagement is deliberately narrow, and all three guards are real-data checked:
+
+| Guard | Value | Effect on real Monza |
+|---|---|---|
+| Minimum chord | 6 m | Normal 30 Hz playback is ~2.8 m at 300 km/h, so no work is done at all |
+| Arc must exceed chord by | 2 % | Engages on 3.5 % of spans (chicanes, corners); straights measure 1.0000 |
+| Sample must be within | half the declared width | A car in the pit lane or off track is left on the chord |
+
+A reconstructed frame is labelled `motion_quality: "reconstructed"` and counted
+in the HUD (`RECONSTRUCTED · n`), so a followed path is never mistaken for a
+measured one. Intervals that fail the plausibility checks are held and marked
+`gap` instead, and the buffer treats anything over 0.5 s as discontinuous rather
+than interpolating across it.
+
 ## Camera
 
 The **CAM** button in the HUD toggles between:

@@ -1,5 +1,6 @@
 import type { WorldOrigin } from "../state/store";
 import type { TrackGeometry } from "../net/protocol";
+import { trackPath } from "../net/trackPath";
 
 /**
  * Replay world space (FastF1 metres, y-up on the 2D plane) mapped into the 3D
@@ -20,35 +21,6 @@ export interface TrackBounds {
   radius: number;
   width: number;
   depth: number;
-}
-
-interface TrackDistances {
-  lengths: Float64Array;
-  total: number;
-}
-
-const trackDistanceCache = new WeakMap<TrackGeometry, TrackDistances>();
-
-function trackDistances(geometry: TrackGeometry): TrackDistances {
-  const cached = trackDistanceCache.get(geometry);
-  if (cached) return cached;
-
-  const count = geometry.x.length;
-  const lengths = new Float64Array(count);
-  let total = 0;
-  for (let index = 0; index < count; index += 1) {
-    const next = (index + 1) % count;
-    const length = Math.hypot(
-      geometry.x[next] - geometry.x[index],
-      geometry.y[next] - geometry.y[index],
-    );
-    lengths[index] = length;
-    total += length;
-  }
-
-  const distances = { lengths, total };
-  trackDistanceCache.set(geometry, distances);
-  return distances;
 }
 
 export function computeBounds(geometry: TrackGeometry): TrackBounds {
@@ -88,32 +60,14 @@ export function trackHeading(
   fraction: number,
   geometry: TrackGeometry,
 ): number | null {
-  const count = geometry.x.length;
-  if (count < 3 || !Number.isFinite(fraction)) return null;
-
-  // `fraction` is distance around the lap. Track samples are not necessarily
-  // uniformly spaced, so multiplying it by `count` can select the wrong part
-  // of the circuit and make the chase camera abruptly turn across the track.
-  const { lengths, total } = trackDistances(geometry);
-  if (total === 0) return null;
-
+  if (geometry.x.length < 3 || !Number.isFinite(fraction)) return null;
+  // `fraction` is distance around the lap, resolved by cumulative segment
+  // length rather than point index, because real centreline samples are not
+  // uniformly spaced. TrackPath owns that table and the tangent lookup.
+  const path = trackPath(geometry);
+  if (!path) return null;
   const wrapped = ((fraction % 1) + 1) % 1;
-  const targetDistance = wrapped * total;
-  let travelled = 0;
-
-  for (let index = 0; index < count; index += 1) {
-    const length = lengths[index];
-    if (length > 0 && travelled + length >= targetDistance) {
-      const next = (index + 1) % count;
-      return Math.atan2(
-        geometry.x[next] - geometry.x[index],
-        geometry.y[next] - geometry.y[index],
-      );
-    }
-    travelled += length;
-  }
-
-  return null;
+  return path.headingAt(wrapped * path.total);
 }
 
 /**

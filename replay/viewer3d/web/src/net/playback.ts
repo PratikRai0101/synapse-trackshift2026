@@ -1,6 +1,52 @@
-import type { DriverState, Frame, TelemetryMessage } from "./protocol";
+import type { DriverState, Frame, TelemetryMessage, TrackGeometry } from "./protocol";
+import { trackPath } from "./trackPath";
 
 interface Sample { frame: Frame; index: number }
+
+/** Below this straight-line separation between two samples, interpolation cannot
+ * visibly cut a corner, so no projection work is done at all. At 30 Hz this is
+ * never reached even at 350 km/h. */
+const ROUTE_MIN_CHORD_M = 6;
+/** The arc must be at least this much longer than the chord before the samples
+ * are treated as straddling a corner. */
+const ROUTE_MIN_ARC_RATIO = 1.02;
+
+/**
+ * Reconstruct a path between two sparse samples by following the centreline.
+ *
+ * The racing line between two observations is unknown, so this does not invent
+ * one: it follows the track between the two known arc positions and carries the
+ * observed lateral offset across, keeping the car on the side of the track it
+ * was recorded on. Returns null whenever the projection cannot be trusted, in
+ * which case the caller keeps the straight chord.
+ */
+function arcRoute(
+  path: ReturnType<typeof trackPath>,
+  from: DriverState,
+  to: DriverState,
+  blend: number,
+): { x: number; y: number; heading: number; lateral: number } | null {
+  if (!path) return null;
+  const a = path.locate(from.x, from.y);
+  const b = path.locate(to.x, to.y);
+  if (!a || !b) return null;
+  // A car in the pit lane or off the track has no reliable along-track
+  // coordinate, so leave those segments on the straight chord.
+  if (a.offCentre > path.halfWidth || b.offCentre > path.halfWidth) return null;
+
+  let delta = b.s - a.s;
+  // Around the start/finish wrap: take the shorter way round, which is the
+  // way the car actually travelled for any realistic sample interval.
+  if (Math.abs(delta) > path.total / 2) delta -= Math.sign(delta) * path.total;
+
+  const chord = Math.hypot(to.x - from.x, to.y - from.y);
+  if (Math.abs(delta) < chord * ROUTE_MIN_ARC_RATIO) return null;
+
+  const s = a.s + delta * blend;
+  const lateral = a.lateral + (b.lateral - a.lateral) * blend;
+  const point = path.pointAt(s, lateral);
+  return { x: point.x, y: point.y, heading: path.headingAt(s), lateral };
+}
 
 /** Monotone cubic interpolation through neighbouring recorded positions. The
  * harmonic slope limiter prevents overshoot without projecting pit cars onto
@@ -30,6 +76,12 @@ export class PlaybackBuffer {
   private paused = false;
   private source = "";
   private renderedTime = -Infinity;
+  private path: ReturnType<typeof trackPath> = null;
+
+  /** Registered by the store when track geometry arrives. */
+  setTrack(geometry: TrackGeometry | null): void {
+    this.path = trackPath(geometry);
+  }
   /** Increments only on discontinuities, so actors/cameras reset together. */
   revision = 0;
 
@@ -76,13 +128,34 @@ export class PlaybackBuffer {
     for (const [code, b] of Object.entries(left.drivers)) {
       const c = right.drivers[code];
       if (!c) { drivers[code] = b; continue; }
-      const maxTravel = Math.max(0, b.speed, c.speed) / 3.6 * (right.t - left.t) * 2 + 10;
-      if (right.t - left.t > .5 || Math.hypot(c.x - b.x, c.y - b.y) > maxTravel) {
-        drivers[code] = { ...b, motion_quality: "gap" }; continue;
+      const interval = right.t - left.t;
+      const chord = Math.hypot(c.x - b.x, c.y - b.y);
+      // Plausibility first: an interval longer than half a second, or one that
+      // implies travel the reported speed cannot produce, is not interpolated at
+      // all. Holding and flagging is the honest response; the gap is also where
+      // the buffer treats the stream as discontinuous. Both checks therefore
+      // bound what any reconstruction below is allowed to bridge.
+      const maxTravel = Math.max(0, b.speed, c.speed) / 3.6 * interval * 2 + 10;
+      if (interval > .5 || chord > maxTravel) {
+        drivers[code] = { ...b, motion_quality: "gap" };
+        continue;
       }
-      const a = previous.drivers[code] ?? b, d = next.drivers[code] ?? c;
-      const x = cubic(a.x, b.x, c.x, d.x, previous.t, left.t, right.t, next.t, time);
-      const y = cubic(a.y, b.y, c.y, d.y, previous.t, left.t, right.t, next.t, time);
+      // Sparse but plausible: follow the track rather than cutting the corner.
+      if (chord > ROUTE_MIN_CHORD_M) {
+        const routed = arcRoute(this.path, b, c, u);
+        if (routed) {
+          drivers[code] = { ...b, x: routed.x, y: routed.y,
+            heading: routed.heading,
+            speed: b.speed + (c.speed - b.speed) * u,
+            fraction: b.fraction + (c.fraction - b.fraction) * u,
+            motion_quality: "reconstructed" };
+          continue;
+        }
+      }
+      const earlier = previous.drivers[code] ?? b;
+      const later = next.drivers[code] ?? c;
+      const x = cubic(earlier.x, b.x, c.x, later.x, previous.t, left.t, right.t, next.t, time);
+      const y = cubic(earlier.y, b.y, c.y, later.y, previous.t, left.t, right.t, next.t, time);
       let heading = b.heading;
       if (Number.isFinite(b.heading) && Number.isFinite(c.heading)) {
         const angle = c.heading! - b.heading!;
