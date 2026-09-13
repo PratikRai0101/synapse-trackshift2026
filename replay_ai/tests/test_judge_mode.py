@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import arcade
 import pytest
 
 from src.interfaces.race_replay import F1RaceReplayWindow
@@ -545,3 +546,87 @@ def test_present_toggle_pauses_and_pages_the_deck():
     assert window.judge_present_controller.index == 1
     window._select_judge_present_page(99)
     assert window.judge_present_controller.index == window._present_card_count() - 1
+
+
+def test_pressing_c_in_present_mode_reveals_the_counterfactual_card(monkeypatch):
+    """Regression: forking used to only bump the page counter 5 -> 6."""
+    window = object.__new__(F1RaceReplayWindow)
+    window.paused = False
+    window._counterfactual_branch = None
+    window._counterfactual_running = False
+    window._counterfactual_status = None
+    window.judge_present_controller = JudgePresentController()
+    window.judge_present_controller.open()
+    window.judge_present_panel = JudgePresentPanel()
+    window._refresh_decision_layout = lambda: None
+    window._focus_report = SimpleNamespace(
+        branch_start=BranchStart(
+            frame_index=12, timestamp_s=4.0, driver="OCO", rival="HAM",
+            own_speed_kmh=277.0, rival_speed_kmh=280.0, gap_s=13.2,
+            own_energy=55.0, battery_temperature=85.0, battery_soh=0.97, lap=2,
+        )
+    )
+    window._recorded_policy_outcome = lambda start: None
+
+    branch = SimpleNamespace(
+        status_text="COUNTERFACTUAL • FROM FRAME 12 • 3 PLAUSIBLE MODES • 3 ACTIONS",
+        outcomes=(SimpleNamespace(action="BURN"),),
+    )
+    monkeypatch.setattr("src.interfaces.race_replay.run_counterfactual",
+                        lambda start, steps, seed, **kwargs: branch)
+
+    assert window._present_card_count() == len(available_present_cards(None))
+
+    window.on_key_press(arcade.key.C, 0)
+
+    assert window._counterfactual_branch is branch
+    # The deck grew and the view jumped to the new card instead of staying put.
+    cards = available_present_cards(branch)
+    assert window._present_card_count() == len(cards)
+    assert window.judge_present_controller.index == list(cards).index("counterfactual")
+
+
+def test_fork_without_a_rival_reports_why_it_did_nothing():
+    window = object.__new__(F1RaceReplayWindow)
+    window._counterfactual_branch = None
+    window._counterfactual_running = False
+    window._counterfactual_status = None
+    window._focus_report = SimpleNamespace(branch_start=None)
+
+    window.on_key_press(arcade.key.C, 0)
+
+    assert window._counterfactual_branch is None
+    assert "CAR AHEAD" in window._counterfactual_status
+
+
+def test_present_footer_advertises_the_fork_result(monkeypatch):
+    calls = []
+
+    class FakeText:
+        def __init__(self, *args, **kwargs):
+            self.text = args[0] if args else ""
+
+        def draw(self):
+            calls.append(("text", self.text))
+
+    monkeypatch.setattr("src.judge_mode.arcade.Text", FakeText)
+    for name in ("draw_rect_filled", "draw_rect_outline", "draw_text"):
+        monkeypatch.setattr("src.judge_mode.arcade." + name,
+                            lambda *args, **kwargs: None)
+
+    window = SimpleNamespace(width=1280, height=720, total_laps=53)
+    snapshot = JudgeModeModel.from_report(_report())
+    controller = JudgePresentController()
+    controller.open()
+
+    # No branch yet: the footer repeats the status so C never looks inert.
+    JudgePresentPanel().draw(window, controller, snapshot=snapshot, branch=None,
+                             status_text="COUNTERFACTUAL • SELECT A DRIVER")
+    texts = [text for kind, text in calls if kind == "text"]
+    assert any("COUNTERFACTUAL • SELECT A DRIVER" == text for text in texts)
+
+    calls.clear()
+    branch = SimpleNamespace(outcomes=(SimpleNamespace(action="BURN"),))
+    JudgePresentPanel().draw(window, controller, snapshot=snapshot, branch=branch)
+    texts = [text for kind, text in calls if kind == "text"]
+    assert any(text.startswith("FORKED") for text in texts)

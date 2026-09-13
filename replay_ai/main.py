@@ -72,9 +72,34 @@ def _rotation_from_cached_geometry(example_lap):
   return (rotation + 180.0) % 360.0 - 180.0
 
 
+def _release_ready_file(ready_file):
+  """Signal the launching GUI that startup finished, even on failure.
+
+  The race-selection window polls for this file to close its modal loading
+  dialog, so writing it on the error path is what prevents an apparent hang.
+  """
+  if not ready_file:
+    return
+  try:
+    with open(ready_file, "w") as handle:
+      handle.write("failed")
+  except OSError:
+    pass
+
+
 def main(year=None, round_number=None, playback_speed=1, session_type='R', visible_hud=True, ready_file=None, show_telemetry_viewer=True):
   print(f"Loading F1 {year} Round {round_number} Session '{session_type}'")
-  session = load_session(year, round_number, session_type)
+  try:
+    session = load_session(year, round_number, session_type)
+  except Exception as exc:
+    # Fail loudly and actionably: a stack trace here previously looked like a
+    # frozen GUI because the loading dialog waited on a process that died.
+    print(f"\nCould not load {year} round {round_number} session '{session_type}'.")
+    print(f"  {exc}")
+    print("\nTry a completed event, e.g.:")
+    print(f"  python main.py --viewer --year {year} --round <completed-round>")
+    _release_ready_file(ready_file)
+    raise SystemExit(2)
 
   print(f"Loaded session: {session.event['EventName']} - {session.event['RoundNumber']} - {session_type}")
 
@@ -231,6 +256,19 @@ if __name__ == "__main__":
 
   sys.excepthook = _log_uncaught
 
+  # Read early so any later failure can still release the launcher's wait.
+  _ready_file_arg = None
+  if "--ready-file" in sys.argv:
+    _ready_index = sys.argv.index("--ready-file") + 1
+    if _ready_index < len(sys.argv):
+      _ready_file_arg = sys.argv[_ready_index]
+
+  def _on_uncaught(exc_type, exc, tb):
+    _release_ready_file(_ready_file_arg)
+    _log_uncaught(exc_type, exc, tb)
+
+  sys.excepthook = _on_uncaught
+
   if "--verbose" not in sys.argv:# fastf1 logging is disabled by default
     logging.getLogger("fastf1").setLevel(logging.CRITICAL)
 
@@ -268,13 +306,16 @@ if __name__ == "__main__":
     session_type = 'SQ' if "--sprint-qualifying" in sys.argv else ('S' if "--sprint" in sys.argv else ('Q' if "--qualifying" in sys.argv else 'R'))
 
     # Optional ready-file path used when spawned from the GUI to signal ready state
-    ready_file = None
-    if "--ready-file" in sys.argv:
-      idx = sys.argv.index("--ready-file") + 1
-      if idx < len(sys.argv):
-        ready_file = sys.argv[idx]
+    ready_file = _ready_file_arg
 
-    main(year, round_number, playback_speed, session_type=session_type, visible_hud=visible_hud, ready_file=ready_file)
+    try:
+      main(year, round_number, playback_speed, session_type=session_type,
+           visible_hud=visible_hud, ready_file=ready_file)
+    except SystemExit:
+      raise
+    except BaseException:
+      _release_ready_file(ready_file)
+      raise
     sys.exit(0)
 
   # Run the GUI

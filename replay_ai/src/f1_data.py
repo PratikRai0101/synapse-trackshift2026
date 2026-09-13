@@ -165,6 +165,22 @@ def _process_single_driver(args):
     }
 
 
+class SessionUnavailableError(RuntimeError):
+    """Raised when a session loads but exposes no usable telemetry."""
+
+
+def _session_has_data(session) -> bool:
+    """True when the session exposes drivers *and* at least one lap."""
+    try:
+        if not session.drivers:
+            return False
+        return len(session.laps) > 0
+    except Exception:
+        # FastF1 raises DataNotLoadedError for unpopulated fields; treat that as
+        # "no data" rather than leaking a confusing internal exception.
+        return False
+
+
 def load_session(year, round_number, session_type="R"):
     # session_type: 'R' (Race), 'S' (Sprint) etc.
     # FastF1 expires its HTTP cache after 12h and will otherwise re-download tens
@@ -172,18 +188,40 @@ def load_session(year, round_number, session_type="R"):
     # offline (cache-only) load first, then fall back to the network.
     if getattr(fastf1.Cache, "_CACHE_DIR", None) is None:
         enable_cache()
+
+    def _fetch(offline: bool):
+        fastf1.Cache.offline_mode(offline)
+        try:
+            session = fastf1.get_session(year, round_number, session_type)
+            session.load(telemetry=True, weather=True)
+            return session
+        finally:
+            fastf1.Cache.offline_mode(False)
+
     try:
-        fastf1.Cache.offline_mode(True)
-        session = fastf1.get_session(year, round_number, session_type)
-        session.load(telemetry=True, weather=True)
-        return session
+        session = _fetch(True)
     except Exception:
-        fastf1.Cache.offline_mode(False)
-        session = fastf1.get_session(year, round_number, session_type)
-        session.load(telemetry=True, weather=True)
-        return session
-    finally:
-        fastf1.Cache.offline_mode(False)
+        session = _fetch(False)
+    else:
+        if not _session_has_data(session):
+            # A cache-only load returns an empty session instead of raising, so
+            # the network fallback has to be driven by a data check, not by an
+            # exception. Without this a future/uncached event silently produced
+            # an empty session and crashed later in the pool setup.
+            try:
+                session = _fetch(False)
+            except Exception:
+                pass
+
+    if not _session_has_data(session):
+        event_name = session.event.get("EventName", "this session")
+        raise SessionUnavailableError(
+            f"No telemetry is available for {year} {event_name} "
+            f"(round {round_number}, session '{session_type}'). "
+            "The event may not have taken place yet. Choose a completed event, "
+            "or re-run with --refresh-data once the data is published."
+        )
+    return session
 
 
 # The following functions require a loaded session object
@@ -590,6 +628,11 @@ def get_race_telemetry(session, session_type="R"):
         pass  # Need to compute from scratch
 
     drivers = session.drivers
+    if not drivers:
+        raise SessionUnavailableError(
+            "The session has no drivers to process. The event may not have "
+            "taken place yet; choose a completed event or refresh the data."
+        )
 
     driver_codes = {num: session.get_driver(num)["Abbreviation"] for num in drivers}
 
@@ -607,12 +650,7 @@ def get_race_telemetry(session, session_type="R"):
         (driver_no, session, driver_codes[driver_no]) for driver_no in drivers
     ]
 
-    num_processes = min(cpu_count(), len(drivers))
-    if num_processes < 1:
-        raise ValueError(
-            "Session contains no loaded drivers and no usable precomputed telemetry. "
-            "Load the FastF1 session or choose an available cached event."
-        )
+    num_processes = max(1, min(cpu_count(), len(drivers)))
 
     with Pool(processes=num_processes) as pool:
         results = pool.map(_process_single_driver, driver_args)
@@ -1401,7 +1439,12 @@ def get_quali_telemetry(session, session_type="Q"):
 
     print(f"Processing {len(session.drivers)} drivers in parallel...")
 
-    num_processes = min(cpu_count(), len(session.drivers))
+    if not session.drivers:
+        raise SessionUnavailableError(
+            "The session has no drivers to process. The event may not have "
+            "taken place yet; choose a completed event or refresh the data."
+        )
+    num_processes = max(1, min(cpu_count(), len(session.drivers)))
 
     with Pool(processes=num_processes) as pool:
         results = pool.map(_process_quali_driver, driver_args)

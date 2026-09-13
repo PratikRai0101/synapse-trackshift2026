@@ -1416,6 +1416,14 @@ def available_present_cards(branch: Any) -> tuple[str, ...]:
     return tuple(cards)
 
 
+def present_card_index(cards: Sequence[str], name: str) -> int:
+    """Return the index of ``name`` in ``cards``, or 0 when it is absent."""
+    try:
+        return list(cards).index(name)
+    except ValueError:
+        return 0
+
+
 class JudgePresentController:
     """Pager state for the full-screen decision presentation."""
 
@@ -1741,7 +1749,7 @@ class JudgePresentPanel:
 
     def draw(self, window: Any, controller: JudgePresentController,
              snapshot: Optional[JudgeModeSnapshot] = None, branch: Any = None,
-             visible: bool = True) -> None:
+             visible: bool = True, status_text: Optional[str] = None) -> None:
         if not visible or not controller.visible:
             self.action_rects = []
             self.page_rects = []
@@ -1840,10 +1848,24 @@ class JudgePresentPanel:
         self._button("prev", "←  PREVIOUS", left + pad, footer_y, 140.0)
         self._button("next", "NEXT  →", right - pad - 140.0, footer_y, 140.0,
                      color=(0, 95, 115))
-        self._t("present_hint",
-                 "V CLOSE   •   ← →  PAGE   •   5–0  SCENARIOS   •   C  FORK",
-                 left + width / 2.0, footer_y + 15.0, 9, MUTED, bold=True,
-                 anchor_x="center")
+        # The footer doubles as fork feedback: without it, pressing C only
+        # changed the page counter, which reads as "the key did nothing".
+        has_branch = branch is not None and getattr(branch, "outcomes", ())
+        if has_branch:
+            hint, hint_color = (
+                f"FORKED • {len(branch.outcomes)} ACTIONS • "
+                "← → PAGE TO THE COUNTERFACTUAL CARD",
+                AMBER,
+            )
+        elif status_text:
+            hint, hint_color = status_text, AMBER
+        else:
+            hint, hint_color = (
+                "V CLOSE   •   ← →  PAGE   •   5–0  SCENARIOS   •   C  FORK",
+                MUTED,
+            )
+        self._t("present_hint", hint, left + width / 2.0, footer_y + 15.0, 9,
+                 hint_color, bold=True, anchor_x="center")
 
     def hit_test(self, x: float, y: float) -> Optional[str]:
         """Return a presentation action from the most recent draw."""

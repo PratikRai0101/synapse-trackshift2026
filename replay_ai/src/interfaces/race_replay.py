@@ -340,6 +340,9 @@ class F1RaceReplayWindow(arcade.Window):
         if not hasattr(self, 'telemetry_stream') or not self.telemetry_stream:
             return
             
+        if not hasattr(self, "_viewer_source_id"):
+            from uuid import uuid4
+            self._viewer_source_id = uuid4().hex
         current_frame = self.frames[min(int(self.frame_index), len(self.frames) - 1)] if self.frames else None
         
         # Get current track status
@@ -400,6 +403,11 @@ class F1RaceReplayWindow(arcade.Window):
             for code, rgb in self.driver_colors.items()
         }
         payload = {
+            "source_id": self._viewer_source_id,
+            "coordinate_units": "dm",  # FastF1 X/Y are 1/10 m; Distance is metres.
+            "run_mode": "recorded",
+            "geometry_provenance": "FastF1 centreline; schematic 20 m ribbon, not surveyed boundaries",
+            "motion_provenance": "Recorded FastF1 positions; pit status from recorded pit windows",
             "frame_index": int(self.frame_index),
             "frame": current_frame,
             "track_status": current_track_status,
@@ -1656,7 +1664,9 @@ class F1RaceReplayWindow(arcade.Window):
         report = self._focus_report
         start = getattr(report, "branch_start", None) if report is not None else None
         if start is None:
-            self._counterfactual_status = "COUNTERFACTUAL • SELECT A DRIVER WITH A RIVAL"
+            self._counterfactual_status = (
+                "COUNTERFACTUAL • SELECT A DRIVER WITH A CAR AHEAD TO FORK"
+            )
             return
         self.paused = True
         self._counterfactual_running = True
@@ -1673,6 +1683,18 @@ class F1RaceReplayWindow(arcade.Window):
             self._counterfactual_status = f"COUNTERFACTUAL • ERROR: {exc}"
         finally:
             self._counterfactual_running = False
+        # The fork adds a card to the presentation deck; jumping straight to it
+        # is what makes pressing C visibly do something.
+        self._focus_counterfactual_card()
+
+    def _focus_counterfactual_card(self) -> None:
+        """Reveal the counterfactual card when the presentation is open."""
+        controller = getattr(self, "judge_present_controller", None)
+        if controller is None or not getattr(controller, "visible", False):
+            return
+        cards = available_present_cards(getattr(self, "_counterfactual_branch", None))
+        if "counterfactual" in cards:
+            controller.index = list(cards).index("counterfactual")
 
     def _build_focus_report(self, frame, selected_drivers, ordered_codes, driver_progress):
         """Build the Race Engineer decision report for the focus driver."""
@@ -2447,6 +2469,7 @@ class F1RaceReplayWindow(arcade.Window):
                 snapshot=self._judge_snapshot,
                 branch=self._counterfactual_branch,
                 visible=getattr(self, "visible_hud", True),
+                status_text=self._counterfactual_status,
             )
 
     def on_update(self, delta_time: float):
