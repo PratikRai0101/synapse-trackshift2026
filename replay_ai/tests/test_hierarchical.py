@@ -1,3 +1,5 @@
+import pytest
+
 from src.intelligence.hierarchical import (
     ERSMode, FortyStateHMM, FeatureExtractor, MotorsportIntelligence, RivalTelemetry, STATES,
     SeasonLifecycleManager,
@@ -68,3 +70,59 @@ def test_lifecycle_dp_can_choose_replacement_for_degraded_pack():
     decision = SeasonLifecycleManager(races=10).decide(soh=0.1, temperature=95)
     assert decision.replace
     assert decision.soh == 1.0
+
+
+def test_belief_stays_a_valid_distribution_under_extreme_feature_errors():
+    """Regression: a large gap swing underflowed every likelihood to zero.
+
+    The old code did `total = sum(weighted) or 1.0`, which normalised an
+    all-zero vector into an all-zero posterior. Downstream that raised
+    "Total of weights must be greater than zero" inside the particle search and
+    blanked the race-engineer panel for the rest of the session.
+    """
+    from src.intelligence.hierarchical import FortyStateHMM, RivalTelemetry
+
+    hmm = FortyStateHMM()
+    for dgap in (0.0, 0.5, 11.9, 60.0, -60.0):
+        result = hmm.observe(RivalTelemetry(300, 100, 0, dgap, lap=1))
+        probabilities = result.ers_probabilities
+        assert sum(probabilities.values()) == pytest.approx(1.0)
+        assert all(value > 0.0 for value in probabilities.values())
+        assert sum(result.belief.values()) == pytest.approx(1.0)
+
+
+def test_belief_floor_bounds_confidence_instead_of_collapsing_to_a_point_mass():
+    from src.intelligence.hierarchical import FortyStateHMM, RivalTelemetry
+
+    hmm = FortyStateHMM(belief_floor=0.02)
+    result = hmm.observe(RivalTelemetry(300, 100, 0, 60.0, lap=1))
+    # Each ERS mode spans 10 of the 40 states, so the uniform mixture puts a
+    # 0.25 * floor floor under every marginal.
+    assert min(result.ers_probabilities.values()) >= 0.25 * 0.02 - 1e-9
+    assert max(result.ers_probabilities.values()) < 1.0 - 1e-9
+
+
+def test_planner_and_search_survive_an_all_zero_belief():
+    """Defence in depth: a bad belief must degrade, not crash the render loop."""
+    from types import SimpleNamespace
+
+    from src.intelligence.control_layers import BoundedScenarioPlanner
+    from src.intelligence.scenario_search import ParticlePOMCP, SearchConfig
+
+    zero = SimpleNamespace(
+        ers_probabilities={"H": 0.0, "M": 0.0, "Lharvest": 0.0, "Lderate": 0.0}
+    )
+    result = ParticlePOMCP(SearchConfig(simulations=16)).search(zero, 1.0, 50.0)
+    assert result.action in {"BURN", "HARVEST", "PROACTIVE TRAP"}
+    plan = BoundedScenarioPlanner().plan(zero, 300.0, 1.0, 50.0)
+    assert plan.command in {"BURN", "HARVEST", "PROACTIVE TRAP"}
+
+
+def test_degenerate_transition_row_does_not_empty_the_filter():
+    from src.intelligence.hierarchical import (
+        ERSMode, FortyStateHMM, RivalTelemetry,
+    )
+
+    hmm = FortyStateHMM(mode_transition={mode.value: {} for mode in ERSMode})
+    result = hmm.observe(RivalTelemetry(300, 100, 0, 0.0, lap=1))
+    assert sum(result.ers_probabilities.values()) == pytest.approx(1.0)

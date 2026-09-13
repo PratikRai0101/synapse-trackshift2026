@@ -22,6 +22,10 @@ class TelemetryStreamServer:
 
   def start(self):
     self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    # A previous run that exited badly leaves the port in TIME_WAIT. Without
+    # SO_REUSEADDR the restart fails with "Address already in use" and the
+    # viewer silently runs without telemetry streaming.
+    self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     self.server_socket.bind((self.host, self.port))
     self.server_socket.listen(5)
     self.running = True
