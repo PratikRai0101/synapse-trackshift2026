@@ -12,6 +12,8 @@ __pycache__/
 
 # Local FastF1/cache/generated data
 .fastf1-cache
+scripts/fastf1_cache/
+*.slxc
 computed_data/
 
 # Generated media/output
