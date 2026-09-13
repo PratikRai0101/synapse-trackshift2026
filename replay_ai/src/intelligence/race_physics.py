@@ -35,19 +35,44 @@ class PassMonitor:
                  clearance_margin_m: float = 0.25) -> None:
         self.track = track or TrackGeometry()
         self.clearance_margin_m = clearance_margin_m
-        self._previous_order: dict[str, float] = {}
+        self._previous_pose: dict[tuple[str, str], tuple[float, float]] = {}
+
+    @staticmethod
+    def _swept_contact(previous, current, half_length, half_width):
+        """Intersect relative linear motion with the open Minkowski rectangle.
+
+        A pair is in contact only when BOTH axes overlap at the same time.
+        Sweeping prevents a same-lane pass from tunnelling between samples.
+        """
+        enter, leave = 0.0, 1.0
+        for start, end, extent in zip(previous, current, (half_length, half_width)):
+            delta = end - start
+            if abs(delta) < 1e-12:
+                if abs(start) >= extent:
+                    return False
+                continue
+            a, b = sorted(((-extent - start) / delta, (extent - start) / delta))
+            enter, leave = max(enter, a), min(leave, b)
+            if enter >= leave:
+                return False
+        return enter < leave
 
     def evaluate(self, ego: CarPose, rival: CarPose) -> PassResult:
         longitudinal_gap = abs(ego.distance_m - rival.distance_m)
         lateral_gap = abs(ego.lateral_m - rival.lateral_m) - (ego.width_m + rival.width_m) / 2
-        clearance = min(longitudinal_gap - (ego.length_m + rival.length_m) / 2,
-                        lateral_gap)
-        contact = clearance < 0.0
+        half_length = (ego.length_m + rival.length_m) / 2
+        half_width = (ego.width_m + rival.width_m) / 2
+        clearance = max(longitudinal_gap - half_length, lateral_gap)
+        relative = (ego.distance_m - rival.distance_m, ego.lateral_m - rival.lateral_m)
+        key = (ego.car_id, rival.car_id)
+        previous = self._previous_pose.get(key)
+        contact = clearance < 0.0 or (
+            previous is not None and self._swept_contact(previous, relative, half_length, half_width)
+        )
         ego_on_track = abs(ego.lateral_m) + ego.width_m / 2 <= self.track.width_m / 2
         rival_on_track = abs(rival.lateral_m) + rival.width_m / 2 <= self.track.width_m / 2
-        previous = self._previous_order.get(ego.car_id)
-        self._previous_order[ego.car_id] = ego.distance_m - rival.distance_m
-        order_changed = previous is not None and previous < 0.0 <= ego.distance_m - rival.distance_m
+        self._previous_pose[key] = relative
+        order_changed = previous is not None and previous[0] < 0.0 <= relative[0]
         if contact:
             return PassResult(False, True, clearance, "contact")
         if not ego_on_track or not rival_on_track:
